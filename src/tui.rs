@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,7 @@ pub struct TuiState {
     selected_option: usize,
     option_names: Vec<String>,
     option_kinds: Vec<OptionKind>,
+    last_exported_scene: RefCell<Option<Scene>>,
 }
 
 const CUSTOM_X_OPTION: &str = "placement-x";
@@ -43,6 +45,7 @@ impl TuiState {
             selected_option: 0,
             option_names: Vec::new(),
             option_kinds: Vec::new(),
+            last_exported_scene: RefCell::new(None),
         };
         state.add_instance("galaxy", registry)?;
         Ok(state)
@@ -62,13 +65,29 @@ impl TuiState {
             selected_option: 0,
             option_names: Vec::new(),
             option_kinds: Vec::new(),
+            last_exported_scene: RefCell::new(None),
         };
         state.sync_selected_options(registry)?;
         Ok(state)
     }
 
     pub fn export_command(&self) -> String {
-        self.scene.export_command()
+        if self.scene.requires_config_export() {
+            self.config_export_command()
+        } else {
+            self.scene.export_command()
+        }
+    }
+
+    fn config_export_command(&self) -> String {
+        let export_path = Scene::tui_export_path();
+        if self.last_exported_scene.borrow().as_ref() != Some(&self.scene) {
+            if let Err(err) = self.scene.save_to_path(&export_path) {
+                return format!("failed to write {}: {}", export_path.display(), err);
+            }
+            *self.last_exported_scene.borrow_mut() = Some(self.scene.clone());
+        }
+        "ascii-animation run --config ~/.config/ascii-animation/tui-export.toml".to_string()
     }
 
     pub fn preview_text(

@@ -81,6 +81,12 @@ impl Scene {
             .unwrap_or_else(|| PathBuf::from(".config/ascii-animation/scene.toml"))
     }
 
+    pub fn tui_export_path() -> PathBuf {
+        BaseDirs::new()
+            .map(|dirs| dirs.home_dir().join(".config/ascii-animation/tui-export.toml"))
+            .unwrap_or_else(|| PathBuf::from(".config/ascii-animation/tui-export.toml"))
+    }
+
     pub fn load_default_config_if_available() -> Result<Option<Self>> {
         let path = Self::default_config_path();
         let text = match std::fs::read_to_string(&path) {
@@ -119,23 +125,30 @@ impl Scene {
         })
     }
 
-    pub fn export_command(&self) -> String {
-        if self.frame_rate == 30
+    pub fn requires_config_export(&self) -> bool {
+        !(self.frame_rate == 30
             && self.instances.len() == 1
-            && self.instances[0].supports_direct_run_export()
-        {
-            let instance = &self.instances[0];
-            let mut command = format!("ascii-animation run {}", instance.preset);
-            for (name, value) in &instance.options {
-                command.push_str(&format!(" --{} {}", name, value.as_cli_value()));
-            }
-            if !self.color {
-                command.push_str(" --no-color");
-            }
-            command
-        } else {
+            && self.instances[0].supports_direct_run_export())
+    }
+
+    pub fn export_command(&self) -> String {
+        if self.requires_config_export() {
             "ascii-animation run --config ~/.config/ascii-animation/scene.toml".to_string()
+        } else {
+            self.direct_run_export_command()
         }
+    }
+
+    fn direct_run_export_command(&self) -> String {
+        let instance = &self.instances[0];
+        let mut command = format!("ascii-animation run {}", instance.preset);
+        for (name, value) in &instance.options {
+            command.push_str(&format!(" --{} {}", name, value.as_cli_value()));
+        }
+        if !self.color {
+            command.push_str(" --no-color");
+        }
+        command
     }
 
     fn validate(self) -> Result<Self> {
