@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
 use crate::error::AsciiAnimError;
-use crate::presets::{build_default_registry, OptionValue, PresetRegistry};
+use crate::presets::{build_default_registry, OptionKind, OptionValue, PresetDescriptor, PresetRegistry};
 use crate::runtime;
 use crate::scene::{AnimationInstance, Layer, Placement, Scene};
 use crate::tui;
@@ -23,55 +24,25 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Run(Box<RunArgs>),
+    Run(Box<RawRunArgs>),
     Tui(TuiArgs),
 }
 
 #[derive(Debug, Args)]
+pub struct RawRunArgs {
+    #[arg(num_args = 0.., allow_hyphen_values = true)]
+    pub raw: Vec<OsString>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct RunArgs {
     pub preset: Option<String>,
-
-    #[arg(long)]
     pub scene: Option<String>,
-
-    #[arg(long)]
     pub config: Option<PathBuf>,
-
-    #[arg(long)]
     pub no_color: bool,
-
-    #[arg(long)]
-    pub arms: Option<i64>,
-
-    #[arg(long)]
-    pub stars: Option<i64>,
-
-    #[arg(long)]
-    pub speed: Option<i64>,
-
-    #[arg(long)]
-    pub size: Option<i64>,
-
-    #[arg(long)]
-    pub twist: Option<f64>,
-
-    #[arg(long)]
-    pub noise: Option<f64>,
-
-    #[arg(long)]
-    pub glow: Option<f64>,
-
-    #[arg(long)]
-    pub twinkle: Option<f64>,
-
-    #[arg(long)]
-    pub palette: Option<String>,
-
-    #[arg(long)]
-    pub gradient: Option<String>,
-
-    #[arg(long)]
     pub seed: Option<u64>,
+    direct_options: BTreeMap<String, String>,
+    direct_inputs: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -82,12 +53,74 @@ pub fn run() -> anyhow::Result<()> {
     let registry = build_default_registry();
     match cli.command {
         Command::Run(args) => {
+            let args = parse_run_args(*args, &registry)?;
             let scene = scene_from_run_args(&args, &registry)?;
             runtime::run_scene(scene, &registry, resolved_seed(args.seed))?;
         }
         Command::Tui(_) => tui::run(&registry)?,
     }
     Ok(())
+}
+
+pub fn parse_run_args_from<I, T>(args: I, registry: &PresetRegistry) -> anyhow::Result<RunArgs>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let cli = Cli::try_parse_from(args)?;
+    match cli.command {
+        Command::Run(args) => Ok(parse_run_args(*args, registry)?),
+        Command::Tui(_) => anyhow::bail!("expected run command"),
+    }
+}
+
+pub fn parse_run_args(args: RawRunArgs, _registry: &PresetRegistry) -> Result<RunArgs> {
+    let mut parsed = RunArgs::default();
+    let raw: Vec<String> = args
+        .raw
+        .into_iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    let mut index = 0;
+
+    while index < raw.len() {
+        match raw[index].as_str() {
+            "--scene" => {
+                parsed.scene = Some(next_value(&raw, &mut index, "scene")?);
+            }
+            "--config" => {
+                parsed.config = Some(PathBuf::from(next_value(&raw, &mut index, "config")?));
+            }
+            "--no-color" => {
+                parsed.no_color = true;
+                index += 1;
+            }
+            "--seed" => {
+                let value = next_value(&raw, &mut index, "seed")?;
+                parsed.seed = Some(parse_seed(&value)?);
+            }
+            token if token.starts_with("--") => {
+                let name = token.trim_start_matches("--").to_string();
+                let value = next_value(&raw, &mut index, &name)?;
+                parsed.direct_inputs.push(token.to_string());
+                parsed.direct_options.insert(name, value);
+            }
+            token => {
+                if parsed.preset.is_some() {
+                    return Err(AsciiAnimError::InvalidOptionType {
+                        option: "preset".to_string(),
+                        expected: "single preset name",
+                        actual: token.to_string(),
+                    });
+                }
+                parsed.preset = Some(token.to_string());
+                parsed.direct_inputs.push("preset".to_string());
+                index += 1;
+            }
+        }
+    }
+
+    Ok(parsed)
 }
 
 fn resolved_seed(seed: Option<u64>) -> u64 {
@@ -101,6 +134,26 @@ where
     seed.unwrap_or_else(generate)
 }
 
+fn next_value(raw: &[String], index: &mut usize, option: &str) -> Result<String> {
+    let value_index = *index + 1;
+    let Some(value) = raw.get(value_index) else {
+        return Err(AsciiAnimError::InvalidOptionType {
+            option: option.to_string(),
+            expected: "value",
+            actual: "<missing>".to_string(),
+        });
+    };
+    *index += 2;
+    Ok(value.clone())
+}
+
+fn parse_seed(raw: &str) -> Result<u64> {
+    raw.parse::<u64>().map_err(|_| AsciiAnimError::InvalidOptionType {
+        option: "seed".to_string(),
+        expected: "integer",
+        actual: raw.to_string(),
+    })
+}
 
 fn reject_conflicting_direct_inputs(args: &RunArgs, source: &'static str) -> Result<()> {
     let direct_inputs = direct_preset_inputs(args);
@@ -125,29 +178,8 @@ fn reject_conflicting_scene_inputs(args: &RunArgs) -> Result<()> {
     Ok(())
 }
 
-
-fn direct_preset_inputs(args: &RunArgs) -> Vec<&'static str> {
-    let mut inputs = Vec::new();
-    if args.preset.is_some() {
-        inputs.push("preset");
-    }
-    push_flag(&mut inputs, "--arms", args.arms.is_some());
-    push_flag(&mut inputs, "--stars", args.stars.is_some());
-    push_flag(&mut inputs, "--speed", args.speed.is_some());
-    push_flag(&mut inputs, "--size", args.size.is_some());
-    push_flag(&mut inputs, "--twist", args.twist.is_some());
-    push_flag(&mut inputs, "--noise", args.noise.is_some());
-    push_flag(&mut inputs, "--glow", args.glow.is_some());
-    push_flag(&mut inputs, "--twinkle", args.twinkle.is_some());
-    push_flag(&mut inputs, "--palette", args.palette.is_some());
-    push_flag(&mut inputs, "--gradient", args.gradient.is_some());
-    inputs
-}
-
-fn push_flag(inputs: &mut Vec<&'static str>, flag: &'static str, enabled: bool) {
-    if enabled {
-        inputs.push(flag);
-    }
+fn direct_preset_inputs(args: &RunArgs) -> Vec<String> {
+    args.direct_inputs.clone()
 }
 
 pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<Scene> {
@@ -178,19 +210,7 @@ pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<
 
     let preset_name = args.preset.as_deref().unwrap_or("galaxy");
     let descriptor = registry.get(preset_name)?;
-    let mut raw = BTreeMap::new();
-
-    insert_int(&mut raw, "arms", args.arms);
-    insert_int(&mut raw, "stars", args.stars);
-    insert_int(&mut raw, "speed", args.speed);
-    insert_int(&mut raw, "size", args.size);
-    insert_float(&mut raw, "twist", args.twist);
-    insert_float(&mut raw, "noise", args.noise);
-    insert_float(&mut raw, "glow", args.glow);
-    insert_float(&mut raw, "twinkle", args.twinkle);
-    insert_choice(&mut raw, "palette", args.palette.clone());
-    insert_choice(&mut raw, "gradient", args.gradient.clone());
-
+    let raw = descriptor_option_values(args, descriptor)?;
     let options = descriptor.validate_options(&raw)?;
     Ok(Scene {
         frame_rate: 30,
@@ -207,21 +227,54 @@ pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<
     })
 }
 
-fn insert_int(raw: &mut BTreeMap<String, OptionValue>, name: &str, value: Option<i64>) {
-    if let Some(value) = value {
-        raw.insert(name.to_string(), OptionValue::Int(value));
+fn descriptor_option_values(
+    args: &RunArgs,
+    descriptor: &PresetDescriptor,
+) -> Result<BTreeMap<String, OptionValue>> {
+    let mut raw = BTreeMap::new();
+
+    for (name, value) in &args.direct_options {
+        let option = descriptor
+            .options()
+            .iter()
+            .find(|option| option.name() == name)
+            .ok_or_else(|| AsciiAnimError::UnknownOption {
+                preset: descriptor.name().to_string(),
+                option: name.clone(),
+            })?;
+        raw.insert(name.clone(), parse_descriptor_value(option.kind(), name, value)?);
     }
+
+    Ok(raw)
 }
 
-fn insert_float(raw: &mut BTreeMap<String, OptionValue>, name: &str, value: Option<f64>) {
-    if let Some(value) = value {
-        raw.insert(name.to_string(), OptionValue::Float(value));
-    }
-}
-
-fn insert_choice(raw: &mut BTreeMap<String, OptionValue>, name: &str, value: Option<String>) {
-    if let Some(value) = value {
-        raw.insert(name.to_string(), OptionValue::Choice(value));
+fn parse_descriptor_value(kind: &OptionKind, name: &str, raw: &str) -> Result<OptionValue> {
+    match kind {
+        OptionKind::Int { .. } => raw
+            .parse::<i64>()
+            .map(OptionValue::Int)
+            .map_err(|_| AsciiAnimError::InvalidOptionType {
+                option: name.to_string(),
+                expected: "integer",
+                actual: raw.to_string(),
+            }),
+        OptionKind::Float { .. } => raw
+            .parse::<f64>()
+            .map(OptionValue::Float)
+            .map_err(|_| AsciiAnimError::InvalidOptionType {
+                option: name.to_string(),
+                expected: "float",
+                actual: raw.to_string(),
+            }),
+        OptionKind::Bool => raw
+            .parse::<bool>()
+            .map(OptionValue::Bool)
+            .map_err(|_| AsciiAnimError::InvalidOptionType {
+                option: name.to_string(),
+                expected: "bool",
+                actual: raw.to_string(),
+            }),
+        OptionKind::Choice { .. } => Ok(OptionValue::Choice(raw.to_string())),
     }
 }
 

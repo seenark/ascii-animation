@@ -30,7 +30,7 @@ impl OptionValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OptionKind {
-    Int { min: i64, max: i64 },
+    Int { min: i64, max: i64, step: i64 },
     Float { min: f64, max: f64 },
     Bool,
     Choice { choices: Vec<String> },
@@ -54,11 +54,23 @@ impl OptionDescriptor {
         max: i64,
         rebuilds_state: bool,
     ) -> Self {
+        Self::int_step(name, label, default, min, max, 1, rebuilds_state)
+    }
+
+    pub fn int_step(
+        name: &str,
+        label: &str,
+        default: i64,
+        min: i64,
+        max: i64,
+        step: i64,
+        rebuilds_state: bool,
+    ) -> Self {
         Self {
             name: name.to_string(),
             label: label.to_string(),
             default: OptionValue::Int(default),
-            kind: OptionKind::Int { min, max },
+            kind: OptionKind::Int { min, max, step },
             rebuilds_state,
         }
     }
@@ -126,12 +138,14 @@ impl OptionDescriptor {
 
     fn validate(&self, preset: &str, value: OptionValue) -> Result<OptionValue> {
         match (&self.kind, value) {
-            (OptionKind::Int { min, max }, OptionValue::Int(value))
-                if value >= *min && value <= *max =>
+            (OptionKind::Int { min, max, step }, OptionValue::Int(value))
+                if value >= *min
+                    && value <= *max
+                    && ((value - *min) % *step == 0) =>
             {
                 Ok(OptionValue::Int(value))
             }
-            (OptionKind::Int { min, max }, OptionValue::Int(value)) => {
+            (OptionKind::Int { min, max, .. }, OptionValue::Int(value)) => {
                 Err(AsciiAnimError::OptionOutOfRange {
                     option: self.name.clone(),
                     min: min.to_string(),

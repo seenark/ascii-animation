@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::sync::Mutex;
 
-use clap::Parser;
-
-use ascii_animation::cli::{scene_from_run_args, Cli, Command};
+use ascii_animation::cli::{parse_run_args_from, scene_from_run_args};
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::render::ansi::render_to_ansi;
 use ascii_animation::runtime::{prepare_scene_terminal, render_scene_frame, TerminalDriver};
@@ -35,9 +33,17 @@ fn galaxy_scene(color: bool) -> Scene {
     }
 }
 
+fn parse_run<I, S>(args: I) -> ascii_animation::cli::RunArgs
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString> + Clone,
+{
+    parse_run_args_from(args, &build_default_registry()).unwrap()
+}
+
 #[test]
 fn parses_direct_galaxy_command() {
-    let cli = Cli::parse_from([
+    let args = parse_run([
         "ascii-animation",
         "run",
         "galaxy",
@@ -49,10 +55,6 @@ fn parses_direct_galaxy_command() {
         "mono",
         "--no-color",
     ]);
-
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
     let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
 
     assert!(!scene.color);
@@ -86,20 +88,14 @@ fn parses_direct_galaxy_command() {
 
 #[test]
 fn leaves_seed_unset_when_flag_is_omitted() {
-    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy"]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
+    let args = parse_run(["ascii-animation", "run", "galaxy"]);
 
     assert!(format!("{args:?}").contains("seed: None"));
 }
 
 #[test]
 fn parses_explicit_seed_value() {
-    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--seed", "17"]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
+    let args = parse_run(["ascii-animation", "run", "galaxy", "--seed", "17"]);
 
     assert!(format!("{args:?}").contains("seed: Some(17)"));
 }
@@ -111,11 +107,7 @@ fn preserves_config_scene_color_without_no_color() {
     let path = dir.path().join("scene.toml");
     galaxy_scene(false).save_to_path(&path).unwrap();
 
-    let cli = Cli::parse_from(["ascii-animation", "run", "--config", path.to_str().unwrap()]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
-
+    let args = parse_run(["ascii-animation", "run", "--config", path.to_str().unwrap()]);
     let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
 
     assert!(!scene.color);
@@ -132,11 +124,7 @@ fn preserves_default_scene_color_without_no_color() {
     let original_home = env::var_os("HOME");
     env::set_var("HOME", home);
 
-    let cli = Cli::parse_from(["ascii-animation", "run", "--scene", "default"]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
-
+    let args = parse_run(["ascii-animation", "run", "--scene", "default"]);
     let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
 
     match original_home {
@@ -149,10 +137,7 @@ fn preserves_default_scene_color_without_no_color() {
 
 #[test]
 fn rejects_unknown_scene_name() {
-    let cli = Cli::parse_from(["ascii-animation", "run", "--scene", "mystery"]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
+    let args = parse_run(["ascii-animation", "run", "--scene", "mystery"]);
 
     let err = scene_from_run_args(&args, &build_default_registry())
         .unwrap_err()
@@ -163,10 +148,7 @@ fn rejects_unknown_scene_name() {
 
 #[test]
 fn rejects_invalid_galaxy_option_range() {
-    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--arms", "99"]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
+    let args = parse_run(["ascii-animation", "run", "galaxy", "--arms", "99"]);
 
     let err = scene_from_run_args(&args, &build_default_registry())
         .unwrap_err()
@@ -184,7 +166,7 @@ fn rejects_direct_preset_flags_with_config_scene() {
     let path = dir.path().join("scene.toml");
     galaxy_scene(true).save_to_path(&path).unwrap();
 
-    let cli = Cli::parse_from([
+    let args = parse_run([
         "ascii-animation",
         "run",
         "--config",
@@ -192,9 +174,6 @@ fn rejects_direct_preset_flags_with_config_scene() {
         "--arms",
         "4",
     ]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
 
     let err = scene_from_run_args(&args, &build_default_registry())
         .unwrap_err()
@@ -208,10 +187,7 @@ fn rejects_direct_preset_flags_with_config_scene() {
 
 #[test]
 fn rejects_direct_preset_name_with_default_scene() {
-    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--scene", "default"]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
+    let args = parse_run(["ascii-animation", "run", "galaxy", "--scene", "default"]);
 
     let err = scene_from_run_args(&args, &build_default_registry())
         .unwrap_err()
@@ -229,7 +205,7 @@ fn rejects_combining_config_and_scene_inputs() {
     let path = dir.path().join("scene.toml");
     galaxy_scene(true).save_to_path(&path).unwrap();
 
-    let cli = Cli::parse_from([
+    let args = parse_run([
         "ascii-animation",
         "run",
         "--config",
@@ -237,15 +213,58 @@ fn rejects_combining_config_and_scene_inputs() {
         "--scene",
         "default",
     ]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
 
     let err = scene_from_run_args(&args, &build_default_registry())
         .unwrap_err()
         .to_string();
 
     assert_eq!(err, "cannot combine --config with --scene");
+}
+
+#[test]
+fn parses_registered_preset_flags_from_descriptor_metadata() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![
+                ascii_animation::presets::OptionDescriptor::int_step(
+                    "count",
+                    "Count",
+                    3,
+                    1,
+                    9,
+                    3,
+                    false,
+                ),
+                ascii_animation::presets::OptionDescriptor::choice(
+                    "palette",
+                    "Palette",
+                    "mono",
+                    vec!["mono", "cosmic"],
+                    false,
+                ),
+            ],
+            demo_renderer,
+        ),
+    ]);
+    let args = ascii_animation::cli::parse_run_args_from(
+        ["ascii-animation", "run", "demo", "--count", "7", "--palette", "cosmic"],
+        &registry,
+    )
+    .unwrap();
+    let scene = scene_from_run_args(&args, &registry).unwrap();
+
+    assert_eq!(scene.instances[0].preset, "demo");
+    assert_eq!(
+        scene.instances[0].options.get("count"),
+        Some(&OptionValue::Int(7))
+    );
+    assert_eq!(
+        scene.instances[0].options.get("palette"),
+        Some(&OptionValue::Choice("cosmic".to_string()))
+    );
 }
 
 #[derive(Debug)]
@@ -380,7 +399,7 @@ fn render_scene_frame_uses_distinct_bounds_for_non_fill_placements() {
 
 #[test]
 fn direct_scene_renders_non_empty_frame() {
-    let cli = Cli::parse_from([
+    let args = parse_run([
         "ascii-animation",
         "run",
         "galaxy",
@@ -388,9 +407,6 @@ fn direct_scene_renders_non_empty_frame() {
         "100",
         "--no-color",
     ]);
-    let Command::Run(args) = cli.command else {
-        panic!("expected run command")
-    };
     let registry = build_default_registry();
     let scene = scene_from_run_args(&args, &registry).unwrap();
 

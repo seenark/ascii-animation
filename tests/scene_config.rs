@@ -214,7 +214,7 @@ fn tui_state_falls_back_to_default_scene_when_default_config_is_unreadable() {
 }
 
 #[test]
-fn tui_state_export_command_writes_current_config_snapshot() {
+fn tui_state_export_command_leaves_unsaved_config_scene_stale() {
     let _home_lock = HOME_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
@@ -244,14 +244,8 @@ fn tui_state_export_command_writes_current_config_snapshot() {
     };
 
     let command = state.export_command();
-    let config_path = command
-        .strip_prefix("ascii-animation run --config ")
-        .map(|path| match path.strip_prefix("~/") {
-            Some(relative) => home.join(relative),
-            None => home.join(path),
-        })
-        .expect("config-backed export command");
-    let exported_scene = Scene::load_from_path(&config_path).unwrap();
+    let status = state.export_status().unwrap();
+    let exported_scene = Scene::load_from_path(&saved_path).unwrap();
 
     match original_home {
         Some(value) => env::set_var("HOME", value),
@@ -259,7 +253,48 @@ fn tui_state_export_command_writes_current_config_snapshot() {
     }
 
     assert_eq!(command, "ascii-animation run --config ~/.config/ascii-animation/scene.toml");
+    assert_eq!(exported_scene, saved_scene);
+    assert_ne!(exported_scene, state.scene);
+    assert_eq!(
+        status,
+        "config export is stale until you press s to save ~/.config/ascii-animation/scene.toml"
+    );
+}
+
+#[test]
+fn tui_state_save_updates_config_export_snapshot() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let saved_path = home.join(".config/ascii-animation/scene.toml");
+    write_scene(
+        &Scene {
+            frame_rate: 30,
+            color: true,
+            instances: vec![galaxy_instance("galaxy-1")],
+        },
+        &saved_path,
+    );
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let registry = build_default_registry();
+    let mut state = TuiState::load_startup(&registry).unwrap();
+    state.add_instance("galaxy", &registry).unwrap();
+
+    state.save_default_scene().unwrap();
+
+    let exported_scene = Scene::load_from_path(&saved_path).unwrap();
+    let status = state.export_status();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
     assert_eq!(exported_scene, state.scene);
+    assert_eq!(status, None);
 }
 
 #[test]
@@ -376,6 +411,24 @@ fn tui_state_can_adjust_integer_option() {
             .unwrap()
             .as_cli_value(),
         "4"
+    );
+}
+
+#[test]
+fn tui_state_applies_descriptor_integer_steps() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.select_option_by_name("stars").unwrap();
+
+    state.adjust_selected_option(1).unwrap();
+
+    assert_eq!(
+        state.scene.instances[0]
+            .options
+            .get("stars")
+            .unwrap()
+            .as_cli_value(),
+        "650"
     );
 }
 

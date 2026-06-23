@@ -60,12 +60,12 @@ impl TuiState {
 
     fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
         let mut state = Self {
+            last_exported_scene: RefCell::new(Some(scene.clone())),
             scene,
             selected_instance: 0,
             selected_option: 0,
             option_names: Vec::new(),
             option_kinds: Vec::new(),
-            last_exported_scene: RefCell::new(None),
         };
         state.sync_selected_options(registry)?;
         Ok(state)
@@ -73,21 +73,31 @@ impl TuiState {
 
     pub fn export_command(&self) -> String {
         if self.scene.requires_config_export() {
-            self.config_export_command()
+            "ascii-animation run --config ~/.config/ascii-animation/scene.toml".to_string()
         } else {
             self.scene.export_command()
         }
     }
 
-    fn config_export_command(&self) -> String {
-        let export_path = Scene::default_config_path();
-        if self.last_exported_scene.borrow().as_ref() != Some(&self.scene) {
-            if let Err(err) = self.scene.save_to_path(&export_path) {
-                return format!("failed to write {}: {}", export_path.display(), err);
-            }
-            *self.last_exported_scene.borrow_mut() = Some(self.scene.clone());
+    pub fn export_status(&self) -> Option<String> {
+        if !self.scene.requires_config_export() {
+            return None;
         }
-        "ascii-animation run --config ~/.config/ascii-animation/scene.toml".to_string()
+
+        if self.last_exported_scene.borrow().as_ref() == Some(&self.scene) {
+            None
+        } else {
+            Some(
+                "config export is stale until you press s to save ~/.config/ascii-animation/scene.toml"
+                    .to_string(),
+            )
+        }
+    }
+
+    pub fn save_default_scene(&mut self) -> Result<()> {
+        self.scene.save_to_path(&Scene::default_config_path())?;
+        *self.last_exported_scene.borrow_mut() = Some(self.scene.clone());
+        Ok(())
     }
 
     pub fn preview_text(
@@ -292,8 +302,8 @@ impl TuiState {
             }
         })?;
         let next = match (option_kind, current) {
-            (OptionKind::Int { min, max }, OptionValue::Int(value)) => {
-                OptionValue::Int((value + delta as i64).clamp(min, max))
+            (OptionKind::Int { min, max, step }, OptionValue::Int(value)) => {
+                OptionValue::Int((value + delta as i64 * step).clamp(min, max))
             }
             (OptionKind::Float { min, max }, OptionValue::Float(value)) => {
                 OptionValue::Float((value + delta as f64 * 0.01).clamp(min, max))
@@ -440,6 +450,9 @@ fn run_loop(
                 }
                 lines.push(Line::from(""));
                 lines.push(Line::from(state.export_command()));
+                if let Some(status) = state.export_status() {
+                    lines.push(Line::from(status));
+                }
                 frame.render_widget(
                     Paragraph::new(lines).block(
                         Block::default()
@@ -489,9 +502,7 @@ fn run_loop(
                 Event::Key(key) if key.code == KeyCode::Char('L') => state.cycle_selected_layer(-1),
                 Event::Key(key) if key.code == KeyCode::Char(']') => state.adjust_selected_z_index(1),
                 Event::Key(key) if key.code == KeyCode::Char('[') => state.adjust_selected_z_index(-1),
-                Event::Key(key) if key.code == KeyCode::Char('s') => {
-                    state.scene.save_to_path(&Scene::default_config_path())?
-                }
+                Event::Key(key) if key.code == KeyCode::Char('s') => state.save_default_scene()?,
                 _ => {}
             }
         }
@@ -538,10 +549,12 @@ fn custom_placement_option_kind(name: &str) -> OptionKind {
         CUSTOM_X_OPTION | CUSTOM_Y_OPTION => OptionKind::Int {
             min: 0,
             max: i64::from(u16::MAX),
+            step: 1,
         },
         CUSTOM_WIDTH_OPTION | CUSTOM_HEIGHT_OPTION => OptionKind::Int {
             min: 1,
             max: i64::from(u16::MAX),
+            step: 1,
         },
         _ => unreachable!("unknown custom placement option"),
     }

@@ -46,7 +46,7 @@ pub fn descriptor() -> PresetDescriptor {
         "A rotating spiral galaxy rendered with ASCII stars",
         vec![
             OptionDescriptor::int("arms", "Arms", 3, 1, 10, true),
-            OptionDescriptor::int("stars", "Stars", 600, 100, 1200, true),
+            OptionDescriptor::int_step("stars", "Stars", 600, 100, 1200, 50, true),
             OptionDescriptor::int("speed", "Speed", 20, 1, 60, false),
             OptionDescriptor::int("size", "Size", 70, 20, 100, true),
             OptionDescriptor::float("twist", "Twist", 0.45, 0.0, 1.0, true),

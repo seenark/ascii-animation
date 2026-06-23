@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use ascii_animation::presets::{
-    galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor, PresetRegistry,
-};
+use ascii_animation::presets::{galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor};
 
 fn demo_renderer(
     _options: &BTreeMap<String, OptionValue>,
@@ -18,7 +16,7 @@ fn descriptor() -> PresetDescriptor {
         "Demo",
         "A demo preset",
         vec![
-            OptionDescriptor::int("count", "Count", 3, 1, 10, true),
+            OptionDescriptor::int_step("count", "Count", 3, 1, 10, 2, true),
             OptionDescriptor::float("glow", "Glow", 0.5, 0.0, 1.0, false),
             OptionDescriptor::choice(
                 "palette",
@@ -57,15 +55,15 @@ fn validation_rejects_unknown_option() {
 }
 
 #[test]
-fn validation_rejects_out_of_range_integer() {
+fn validation_rejects_integer_step_mismatch() {
     let mut raw = BTreeMap::new();
-    raw.insert("count".to_string(), OptionValue::Int(11));
+    raw.insert("count".to_string(), OptionValue::Int(4));
 
     let err = descriptor().validate_options(&raw).unwrap_err().to_string();
 
     assert_eq!(
         err,
-        "option `count` is out of range: expected 1..=10, got 11"
+        "option `count` is out of range: expected 1..=10, got 4"
     );
 }
 
@@ -104,16 +102,30 @@ fn descriptors_expose_option_kind_for_tui_and_cli() {
 
     assert_eq!(
         preset.options()[0].kind(),
-        &OptionKind::Int { min: 1, max: 10 }
+        &OptionKind::Int {
+            min: 1,
+            max: 10,
+            step: 2,
+        }
     );
     assert!(preset.options()[0].rebuilds_state());
 }
 
 #[test]
-fn default_registry_includes_galaxy_descriptor() {
-    let registry = PresetRegistry::default();
-    let descriptor = registry.get("galaxy").unwrap();
+fn galaxy_stars_descriptor_requires_step_50() {
+    let descriptor = galaxy::descriptor();
 
-    assert_eq!(descriptor.name(), "galaxy");
-    assert_eq!(descriptor.defaults(), galaxy::descriptor().defaults());
+    assert_eq!(
+        descriptor
+            .options()
+            .iter()
+            .find(|option| option.name() == "stars")
+            .unwrap()
+            .kind(),
+        &OptionKind::Int {
+            min: 100,
+            max: 1200,
+            step: 50,
+        }
+    );
 }
