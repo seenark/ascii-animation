@@ -153,6 +153,7 @@ fn render_scene_frame_respects_non_fill_placement() {
 struct FailingTerminal {
     raw_enabled: bool,
     raw_disabled: bool,
+    restored: bool,
 }
 
 impl TerminalDriver for FailingTerminal {
@@ -171,6 +172,7 @@ impl TerminalDriver for FailingTerminal {
     }
 
     fn restore_scene_terminal<W: std::io::Write>(&mut self, _stdout: &mut W) -> std::io::Result<()> {
+        self.restored = true;
         Ok(())
     }
 
@@ -192,6 +194,7 @@ fn prepare_scene_terminal_disables_raw_mode_when_setup_fails() {
     let mut terminal = FailingTerminal {
         raw_enabled: false,
         raw_disabled: false,
+        restored: false,
     };
     let mut stdout = Vec::new();
 
@@ -200,4 +203,5 @@ fn prepare_scene_terminal_disables_raw_mode_when_setup_fails() {
     assert_eq!(err.to_string(), "terminal error: setup failed");
     assert!(terminal.raw_enabled);
     assert!(terminal.raw_disabled);
+    assert!(terminal.restored);
 }

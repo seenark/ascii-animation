@@ -105,11 +105,11 @@ pub fn prepare_scene_terminal<W: Write, T: TerminalDriver>(
 ) -> Result<()> {
     terminal.enable_raw_mode().map_err(terminal_error)?;
     if let Err(err) = terminal.setup_scene_terminal(stdout) {
-        return match terminal.disable_raw_mode() {
+        return match restore_scene_terminal(stdout, terminal) {
             Ok(()) => Err(terminal_error(err)),
-            Err(disable_err) => Err(AsciiAnimError::Terminal(format!(
-                "{}; additionally failed to disable raw mode: {}",
-                err, disable_err
+            Err(cleanup_err) => Err(AsciiAnimError::Terminal(format!(
+                "{}; additionally failed to restore terminal: {}",
+                err, cleanup_err
             ))),
         };
     }
