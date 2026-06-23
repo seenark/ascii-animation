@@ -7,6 +7,8 @@ use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 use ascii_animation::tui::TuiState;
 use ascii_animation::AsciiAnimError;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
@@ -450,6 +452,50 @@ fn tui_state_starts_with_galaxy_and_exports_command() {
         .starts_with("ascii-animation run galaxy"));
 }
 
+#[test]
+fn tui_layout_places_options_on_left_and_preview_on_right() {
+    let layout = ascii_animation::tui::tui_layout(Rect::new(0, 0, 100, 40));
+
+    assert_eq!(layout.options.x, 0);
+    assert_eq!(layout.options.width, 30);
+    assert_eq!(layout.preview.x, 30);
+    assert_eq!(layout.preview.width, 70);
+    assert_eq!(layout.options.height, 40);
+    assert_eq!(layout.preview.height, 40);
+}
+
+
+#[test]
+fn tui_copy_hotkey_returns_whole_export_command() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    let key_event = KeyEvent {
+        code: KeyCode::Char('c'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let expected = state.export_command();
+
+    let action = ascii_animation::tui::handle_tui_key(&mut state, key_event, &registry).unwrap();
+
+    assert_eq!(action, ascii_animation::tui::TuiAction::CopyCommand(expected));
+}
+
+#[test]
+fn tui_copy_status_reports_success_and_failure() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+
+    state.set_copy_status(Ok(()));
+    assert_eq!(state.copy_status().unwrap(), "Copied command to clipboard");
+
+    state.set_copy_status(Err("clipboard unavailable".to_string()));
+    assert_eq!(
+        state.copy_status().unwrap(),
+        "Copy failed: clipboard unavailable"
+    );
+}
 #[test]
 fn tui_state_can_adjust_integer_option() {
     let registry = build_default_registry();

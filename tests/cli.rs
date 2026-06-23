@@ -139,6 +139,76 @@ fn preserves_default_scene_color_without_no_color() {
 }
 
 #[test]
+fn bare_run_loads_saved_default_scene_when_present() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    galaxy_scene(false).save_to_path(&path).unwrap();
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let args = parse_run(["ascii-animation", "run"]);
+    let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert!(!scene.color);
+    assert_eq!(scene.frame_rate, 24);
+    assert_eq!(scene.instances[0].preset, "galaxy");
+}
+
+#[test]
+fn bare_run_falls_back_to_direct_galaxy_when_default_config_is_missing() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let args = parse_run(["ascii-animation", "run"]);
+    let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert_eq!(scene.frame_rate, 30);
+    assert!(scene.color);
+    assert_eq!(scene.instances.len(), 1);
+    assert_eq!(scene.instances[0].id, "galaxy-1");
+}
+
+#[test]
+fn bare_run_no_color_overrides_saved_default_scene_color() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    galaxy_scene(true).save_to_path(&path).unwrap();
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let args = parse_run(["ascii-animation", "run", "--no-color"]);
+    let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert!(!scene.color);
+    assert_eq!(scene.frame_rate, 24);
+}
+
+#[test]
 fn rejects_unknown_scene_name() {
     let args = parse_run(["ascii-animation", "run", "--scene", "mystery"]);
 

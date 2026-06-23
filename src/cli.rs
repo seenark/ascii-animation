@@ -233,6 +233,15 @@ pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<
         });
     }
 
+    if direct_preset_inputs(args).is_empty() {
+        if let Some(mut scene) = Scene::load_default_config_if_available()? {
+            if args.no_color {
+                scene.color = false;
+            }
+            return Ok(scene);
+        }
+    }
+
     let preset_name = args.preset.as_deref().unwrap_or("galaxy");
     let descriptor = registry.get(preset_name)?;
     let raw = descriptor_option_values(args, descriptor)?;

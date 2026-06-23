@@ -3,11 +3,11 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -27,6 +27,32 @@ pub struct TuiState {
     option_kinds: Vec<OptionKind>,
     custom_placements: Vec<Placement>,
     last_exported_scene: RefCell<Option<Scene>>,
+    last_copy_status: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TuiLayout {
+    pub options: Rect,
+    pub preview: Rect,
+}
+
+pub fn tui_layout(area: Rect) -> TuiLayout {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .split(area);
+
+    TuiLayout {
+        options: chunks[0],
+        preview: chunks[1],
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TuiAction {
+    Continue,
+    Quit,
+    CopyCommand(String),
 }
 
 const CUSTOM_X_OPTION: &str = "placement-x";
@@ -48,6 +74,7 @@ impl TuiState {
             option_kinds: Vec::new(),
             custom_placements: Vec::new(),
             last_exported_scene: RefCell::new(None),
+            last_copy_status: None,
         };
         state.add_instance("galaxy", registry)?;
         Ok(state)
@@ -63,6 +90,7 @@ impl TuiState {
     fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
         let mut state = Self {
             last_exported_scene: RefCell::new(None),
+            last_copy_status: None,
             custom_placements: scene
                 .instances
                 .iter()
@@ -113,6 +141,17 @@ impl TuiState {
                     .to_string(),
             )
         }
+    }
+
+    pub fn copy_status(&self) -> Option<&str> {
+        self.last_copy_status.as_deref()
+    }
+
+    pub fn set_copy_status(&mut self, result: std::result::Result<(), String>) {
+        self.last_copy_status = Some(match result {
+            Ok(()) => "Copied command to clipboard".to_string(),
+            Err(message) => format!("Copy failed: {message}"),
+        });
     }
 
     pub fn save_default_scene(&mut self) -> Result<()> {
@@ -395,6 +434,97 @@ pub fn run(registry: &PresetRegistry) -> Result<()> {
     result.and(restore_result)
 }
 
+fn copy_to_clipboard(text: &str) -> Result<()> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|err| AsciiAnimError::Clipboard(err.to_string()))?;
+    clipboard
+        .set_text(text.to_string())
+        .map_err(|err| AsciiAnimError::Clipboard(err.to_string()))
+}
+
+pub fn handle_tui_key(
+    state: &mut TuiState,
+    key: KeyEvent,
+    registry: &PresetRegistry,
+) -> Result<TuiAction> {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => Ok(TuiAction::Quit),
+        KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
+            Ok(TuiAction::CopyCommand(state.export_command()))
+        }
+        KeyCode::Tab => {
+            state.cycle_selected_instance(1, registry)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::BackTab => {
+            state.cycle_selected_instance(-1, registry)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Down => {
+            state.next_option();
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Up => {
+            state.previous_option();
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Right => {
+            state.adjust_selected_option(1)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Left => {
+            state.adjust_selected_option(-1)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('a') => {
+            let preset = state.selected_instance().preset.clone();
+            state.add_instance(&preset, registry)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('d') => {
+            state.remove_selected_instance(registry)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('p') => {
+            state.cycle_selected_preset(registry, 1)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('P') => {
+            state.cycle_selected_preset(registry, -1)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('m') => {
+            state.cycle_selected_placement(1, registry)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('M') => {
+            state.cycle_selected_placement(-1, registry)?;
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('l') => {
+            state.cycle_selected_layer(1);
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('L') => {
+            state.cycle_selected_layer(-1);
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char(']') => {
+            state.adjust_selected_z_index(1);
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('[') => {
+            state.adjust_selected_z_index(-1);
+            Ok(TuiAction::Continue)
+        }
+        KeyCode::Char('s') => {
+            state.save_default_scene()?;
+            Ok(TuiAction::Continue)
+        }
+        _ => Ok(TuiAction::Continue),
+    }
+}
+
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     registry: &PresetRegistry,
@@ -404,13 +534,10 @@ fn run_loop(
     loop {
         terminal
             .draw(|frame| {
-                let chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-                    .split(frame.area());
+                let layout = tui_layout(frame.area());
 
-                let preview_width = chunks[0].width.saturating_sub(2).max(1);
-                let preview_height = chunks[0].height.saturating_sub(2).max(1);
+                let preview_width = layout.preview.width.saturating_sub(2).max(1);
+                let preview_height = layout.preview.height.saturating_sub(2).max(1);
                 let preview = state.preview_text(
                     registry,
                     started.elapsed().as_secs_f64(),
@@ -420,14 +547,14 @@ fn run_loop(
                 frame.render_widget(
                     Paragraph::new(preview)
                         .block(Block::default().title("Preview").borders(Borders::ALL)),
-                    chunks[0],
+                    layout.preview,
                 );
 
                 let instance = state.selected_instance();
                 let mut lines = vec![
                     Line::from("Controls: Tab/Shift-Tab instance, ↑/↓ option, ←/→ adjust"),
                     Line::from("a add, d delete, p/P preset, m/M placement, l/L layer, [/ ] z"),
-                    Line::from("s save, q quit"),
+                    Line::from("s save, c copy command, q quit"),
                     Line::from(""),
                     Line::from(format!(
                         "Selected: {} ({}/{})",
@@ -470,57 +597,32 @@ fn run_loop(
                 if let Some(status) = state.export_status() {
                     lines.push(Line::from(status));
                 }
+                if let Some(status) = state.copy_status() {
+                    lines.push(Line::from(status));
+                }
                 frame.render_widget(
                     Paragraph::new(lines).block(
                         Block::default()
                             .title("Scene / Options / Export")
                             .borders(Borders::ALL),
                     ),
-                    chunks[1],
+                    layout.options,
                 );
             })
             .map_err(terminal_error)?;
 
         if event::poll(Duration::from_millis(16)).map_err(terminal_error)? {
-            match event::read().map_err(terminal_error)? {
-                Event::Key(key) if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc => {
-                    return Ok(());
+            if let Event::Key(key) = event::read().map_err(terminal_error)? {
+                match handle_tui_key(state, key, registry)? {
+                    TuiAction::Quit => break Ok(()),
+                    TuiAction::CopyCommand(command) => {
+                        state.set_copy_status(
+                            copy_to_clipboard(&command).map_err(|err| err.to_string()),
+                        );
+                        continue;
+                    }
+                    TuiAction::Continue => continue,
                 }
-                Event::Key(key) if key.code == KeyCode::Tab => {
-                    state.cycle_selected_instance(1, registry)?
-                }
-                Event::Key(key) if key.code == KeyCode::BackTab => {
-                    state.cycle_selected_instance(-1, registry)?
-                }
-                Event::Key(key) if key.code == KeyCode::Down => state.next_option(),
-                Event::Key(key) if key.code == KeyCode::Up => state.previous_option(),
-                Event::Key(key) if key.code == KeyCode::Right => state.adjust_selected_option(1)?,
-                Event::Key(key) if key.code == KeyCode::Left => state.adjust_selected_option(-1)?,
-                Event::Key(key) if key.code == KeyCode::Char('a') => {
-                    let preset = state.selected_instance().preset.clone();
-                    state.add_instance(&preset, registry)?;
-                }
-                Event::Key(key) if key.code == KeyCode::Char('d') => {
-                    state.remove_selected_instance(registry)?
-                }
-                Event::Key(key) if key.code == KeyCode::Char('p') => {
-                    state.cycle_selected_preset(registry, 1)?
-                }
-                Event::Key(key) if key.code == KeyCode::Char('P') => {
-                    state.cycle_selected_preset(registry, -1)?
-                }
-                Event::Key(key) if key.code == KeyCode::Char('m') => {
-                    state.cycle_selected_placement(1, registry)?
-                }
-                Event::Key(key) if key.code == KeyCode::Char('M') => {
-                    state.cycle_selected_placement(-1, registry)?
-                }
-                Event::Key(key) if key.code == KeyCode::Char('l') => state.cycle_selected_layer(1),
-                Event::Key(key) if key.code == KeyCode::Char('L') => state.cycle_selected_layer(-1),
-                Event::Key(key) if key.code == KeyCode::Char(']') => state.adjust_selected_z_index(1),
-                Event::Key(key) if key.code == KeyCode::Char('[') => state.adjust_selected_z_index(-1),
-                Event::Key(key) if key.code == KeyCode::Char('s') => state.save_default_scene()?,
-                _ => {}
             }
         }
     }

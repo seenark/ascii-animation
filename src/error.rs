@@ -62,6 +62,9 @@ pub enum AsciiAnimError {
         source: std::io::Error,
     },
 
+
+    #[error("clipboard error: {0}")]
+    Clipboard(String),
     #[error("terminal error: {0}")]
     Terminal(String),
 }
