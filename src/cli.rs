@@ -5,6 +5,7 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::presets::{build_default_registry, OptionValue, PresetRegistry};
 use crate::runtime;
+use crate::error::AsciiAnimError;
 use crate::scene::{AnimationInstance, Layer, Placement, Scene};
 use crate::tui;
 use crate::Result;
@@ -94,12 +95,18 @@ pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<
         return Ok(scene);
     }
 
-    if args.scene.as_deref() == Some("default") {
-        let mut scene = Scene::load_from_path(&Scene::default_config_path())?;
-        if args.no_color {
-            scene.color = false;
+    if let Some(scene_name) = args.scene.as_deref() {
+        if scene_name == "default" {
+            let mut scene = Scene::load_from_path(&Scene::default_config_path())?;
+            if args.no_color {
+                scene.color = false;
+            }
+            return Ok(scene);
         }
-        return Ok(scene);
+
+        return Err(AsciiAnimError::UnknownScene {
+            name: scene_name.to_string(),
+        });
     }
 
     let preset_name = args.preset.as_deref().unwrap_or("galaxy");

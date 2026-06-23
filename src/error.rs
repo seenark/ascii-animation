@@ -5,6 +5,9 @@ pub enum AsciiAnimError {
     #[error("unknown preset: {name}")]
     UnknownPreset { name: String },
 
+    #[error("unknown scene: {name}")]
+    UnknownScene { name: String },
+
     #[error("unknown option `{option}` for preset `{preset}`")]
     UnknownOption { preset: String, option: String },
 

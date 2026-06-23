@@ -100,6 +100,16 @@ fn preserves_default_scene_color_without_no_color() {
 }
 
 #[test]
+fn rejects_unknown_scene_name() {
+    let cli = Cli::parse_from(["ascii-animation", "run", "--scene", "mystery"]);
+    let Command::Run(args) = cli.command else { panic!("expected run command") };
+
+    let err = scene_from_run_args(&args, &build_default_registry()).unwrap_err().to_string();
+
+    assert_eq!(err, "unknown scene: mystery");
+}
+
+#[test]
 fn rejects_invalid_galaxy_option_range() {
     let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--arms", "99"]);
     let Command::Run(args) = cli.command else { panic!("expected run command") };
