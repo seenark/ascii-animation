@@ -47,6 +47,15 @@ pub struct AnimationInstance {
     pub z_index: i32,
     pub enabled: bool,
 }
+impl AnimationInstance {
+    fn supports_direct_run_export(&self) -> bool {
+        self.enabled
+            && self.placement == Placement::Center
+            && self.layer == Layer::Normal
+            && self.z_index == 0
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -98,13 +107,8 @@ impl Scene {
     }
 
     pub fn export_command(&self) -> String {
-        let enabled: Vec<&AnimationInstance> = self
-            .instances
-            .iter()
-            .filter(|instance| instance.enabled)
-            .collect();
-        if self.instances.len() == 1 && enabled.len() == 1 {
-            let instance = enabled[0];
+        if self.instances.len() == 1 && self.instances[0].supports_direct_run_export() {
+            let instance = &self.instances[0];
             let mut command = format!("ascii-animation run {}", instance.preset);
             for (name, value) in &instance.options {
                 command.push_str(&format!(" --{} {}", name, value.as_cli_value()));

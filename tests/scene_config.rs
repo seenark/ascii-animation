@@ -59,6 +59,38 @@ fn single_instance_exports_full_command() {
         "ascii-animation run galaxy --arms 3 --palette cosmic"
     );
 }
+#[test]
+fn single_instance_with_non_default_metadata_exports_config_command() {
+    for instance in [
+        AnimationInstance {
+            placement: Placement::Right,
+            ..galaxy_instance("galaxy-1")
+        },
+        AnimationInstance {
+            layer: Layer::Foreground,
+            ..galaxy_instance("galaxy-1")
+        },
+        AnimationInstance {
+            z_index: 2,
+            ..galaxy_instance("galaxy-1")
+        },
+        AnimationInstance {
+            enabled: false,
+            ..galaxy_instance("galaxy-1")
+        },
+    ] {
+        let scene = Scene {
+            frame_rate: 30,
+            color: true,
+            instances: vec![instance],
+        };
+
+        assert_eq!(
+            scene.export_command(),
+            "ascii-animation run --config ~/.config/ascii-animation/scene.toml"
+        );
+    }
+}
 
 #[test]
 fn multi_instance_exports_config_command() {

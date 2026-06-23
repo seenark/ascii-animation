@@ -167,10 +167,8 @@ fn should_exit_scene_loop(event: &Event) -> bool {
     matches!(
         event,
         Event::Key(key)
-            if key.code == KeyCode::Esc
-                || key.code == KeyCode::Char('q')
-                || (key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL))
+            if key.code == KeyCode::Char('c')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
     )
 }
 
@@ -311,6 +309,24 @@ mod tests {
             events: VecDeque::from([
                 key(KeyCode::Char('c'), KeyModifiers::NONE),
                 key(KeyCode::Char('q'), KeyModifiers::NONE),
+                key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            ]),
+            size_calls: 0,
+        };
+
+        run_scene_loop(&mut stdout, &mut terminal, scene(), &registry, 1).unwrap();
+
+        assert_eq!(terminal.size_calls, 2);
+    }
+
+    #[test]
+    fn esc_does_not_exit_scene_loop() {
+        let registry = PresetRegistry::default();
+        let mut stdout = Vec::new();
+        let mut terminal = LoopTerminal {
+            events: VecDeque::from([
+                key(KeyCode::Esc, KeyModifiers::NONE),
+                key(KeyCode::Char('c'), KeyModifiers::CONTROL),
             ]),
             size_calls: 0,
         };
