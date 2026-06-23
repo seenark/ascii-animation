@@ -188,6 +188,37 @@ fn tui_state_loads_saved_default_scene_on_startup() {
 }
 
 #[test]
+fn tui_state_treats_normalized_startup_scene_as_fresh_export() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    let scene = Scene {
+        frame_rate: 12,
+        color: false,
+        instances: vec![AnimationInstance {
+            placement: Placement::Right,
+            ..galaxy_instance("saved-galaxy")
+        }],
+    };
+    write_scene(&scene, &path);
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let registry = build_default_registry();
+    let state = TuiState::load_startup(&registry).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert_eq!(state.export_status(), None);
+    assert_ne!(state.scene.instances[0].options, scene.instances[0].options);
+}
+
+#[test]
 fn tui_state_falls_back_to_default_scene_when_default_config_is_missing() {
     let _home_lock = HOME_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();

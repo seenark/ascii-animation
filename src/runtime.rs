@@ -78,7 +78,8 @@ pub fn render_scene_frame(
             desired_width,
             desired_height,
         );
-        let mut renderer = descriptor.create_renderer(&instance.options, seed + order as u64)?;
+        let mut renderer =
+            descriptor.create_renderer(&instance.options, seed.wrapping_add(order as u64))?;
         renderer.render(
             &mut frame,
             RenderContext {

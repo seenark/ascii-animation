@@ -10,6 +10,9 @@ use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
+static RECORDED_SEEDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+
+
 fn galaxy_scene(color: bool) -> Scene {
     let mut options = BTreeMap::new();
     options.insert("arms".to_string(), OptionValue::Int(3));
@@ -369,6 +372,15 @@ fn demo_renderer(
 ) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
     Ok(Box::new(FillRenderer { ch: '#' }))
 }
+
+fn seed_recording_renderer(
+    _options: &BTreeMap<String, OptionValue>,
+    seed: u64,
+) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
+    RECORDED_SEEDS.lock().unwrap().push(seed);
+    Ok(Box::new(FillRenderer { ch: '#' }))
+}
+
 fn assert_filled_region(
     frame: &ascii_animation::render::FrameBuffer,
     expected_x: u16,
@@ -460,6 +472,48 @@ fn render_scene_frame_uses_distinct_bounds_for_non_fill_placements() {
         let frame = render_scene_frame(&scene, &registry, 1, 0.0, 8, 4).unwrap();
         assert_filled_region(&frame, x, y, width, height);
     }
+}
+
+#[test]
+fn render_scene_frame_wraps_instance_seed_derivation() {
+    RECORDED_SEEDS.lock().unwrap().clear();
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![],
+            seed_recording_renderer,
+        ),
+    ]);
+    let scene = Scene {
+        frame_rate: 24,
+        color: false,
+        instances: vec![
+            AnimationInstance {
+                id: "demo-1".to_string(),
+                preset: "demo".to_string(),
+                options: BTreeMap::new(),
+                placement: Placement::Fill,
+                layer: Layer::Normal,
+                z_index: 0,
+                enabled: true,
+            },
+            AnimationInstance {
+                id: "demo-2".to_string(),
+                preset: "demo".to_string(),
+                options: BTreeMap::new(),
+                placement: Placement::Fill,
+                layer: Layer::Normal,
+                z_index: 0,
+                enabled: true,
+            },
+        ],
+    };
+
+    render_scene_frame(&scene, &registry, u64::MAX, 0.0, 6, 3).unwrap();
+
+    assert_eq!(*RECORDED_SEEDS.lock().unwrap(), vec![u64::MAX, 0]);
 }
 
 

@@ -62,7 +62,7 @@ impl TuiState {
 
     fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
         let mut state = Self {
-            last_exported_scene: RefCell::new(Some(scene.clone())),
+            last_exported_scene: RefCell::new(None),
             custom_placements: scene
                 .instances
                 .iter()
@@ -88,6 +88,7 @@ impl TuiState {
             option_kinds: Vec::new(),
         };
         state.sync_selected_options(registry)?;
+        *state.last_exported_scene.borrow_mut() = Some(state.scene.clone());
         Ok(state)
     }
 
