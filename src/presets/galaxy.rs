@@ -72,7 +72,8 @@ pub fn descriptor() -> PresetDescriptor {
 }
 
 pub fn renderer(options: &BTreeMap<String, OptionValue>, seed: u64) -> Result<GalaxyRenderer> {
-    let options = GalaxyOptions::from_values(options)?;
+    let validated = descriptor().validate_options(options)?;
+    let options = GalaxyOptions::from_values(&validated)?;
     let mut rng = StdRng::seed_from_u64(seed);
     let stars = build_stars(&options, &mut rng);
     Ok(GalaxyRenderer { options, stars })
