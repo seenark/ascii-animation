@@ -340,13 +340,15 @@ fn direct_scene_renders_non_empty_frame() {
 }
 
 #[test]
-fn render_scene_frame_respects_non_fill_placement() {
+fn render_scene_frame_respects_custom_placement() {
     let registry = build_default_registry();
     let mut scene = galaxy_scene(false);
-    scene.instances[0].placement = Placement::Right;
-    scene.instances[0]
-        .options
-        .insert("size".to_string(), OptionValue::Int(20));
+    scene.instances[0].placement = Placement::Custom {
+        x: 20,
+        y: 0,
+        width: 20,
+        height: 16,
+    };
 
     let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
 

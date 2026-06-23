@@ -1,11 +1,15 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::path::Path;
+use std::sync::Mutex;
 
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 use ascii_animation::tui::TuiState;
 use ascii_animation::AsciiAnimError;
 use ratatui::style::Color;
+
+static HOME_LOCK: Mutex<()> = Mutex::new(());
 
 fn galaxy_instance(id: &str) -> AnimationInstance {
     let mut options = BTreeMap::new();
@@ -147,6 +151,66 @@ fn default_config_path_expands_home_directory() {
         Scene::default_config_path(),
         home.join(".config/ascii-animation/scene.toml")
     );
+}
+
+#[test]
+fn tui_state_loads_saved_default_scene_on_startup() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    let scene = Scene {
+        frame_rate: 12,
+        color: false,
+        instances: vec![AnimationInstance {
+            placement: Placement::Right,
+            ..galaxy_instance("saved-galaxy")
+        }],
+    };
+    write_scene(&scene, &path);
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let registry = build_default_registry();
+    let state = TuiState::load_startup(&registry).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert_eq!(state.scene.frame_rate, 12);
+    assert!(!state.scene.color);
+    assert_eq!(state.scene.instances.len(), 1);
+    assert_eq!(state.scene.instances[0].id, "saved-galaxy");
+    assert_eq!(state.scene.instances[0].placement, Placement::Right);
+}
+
+#[test]
+fn tui_state_falls_back_to_default_scene_when_default_config_is_unreadable() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    std::fs::create_dir_all(&path).unwrap();
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let registry = build_default_registry();
+    let state = TuiState::load_startup(&registry).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert_eq!(state.scene.frame_rate, 30);
+    assert!(state.scene.color);
+    assert_eq!(state.scene.instances.len(), 1);
+    assert_eq!(state.scene.instances[0].preset, "galaxy");
+    assert_eq!(state.scene.instances[0].placement, Placement::Center);
 }
 
 #[test]
@@ -331,7 +395,9 @@ fn tui_state_can_edit_selected_instance_structure() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
     state.add_instance("galaxy", &registry).unwrap();
-    state.set_selected_placement(Placement::Right);
+    state
+        .set_selected_placement(Placement::Right, &registry)
+        .unwrap();
     state.cycle_selected_layer(1);
     state.adjust_selected_z_index(3);
     state.cycle_selected_preset(&registry, 1).unwrap();
@@ -347,21 +413,64 @@ fn tui_state_cycles_through_custom_placement_without_collapsing_it() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
 
-    state.set_selected_placement(Placement::Fill);
-    state.cycle_selected_placement(1);
+    state
+        .set_selected_placement(Placement::Fill, &registry)
+        .unwrap();
+    state.cycle_selected_placement(1, &registry).unwrap();
     assert!(matches!(
         state.selected_instance().placement,
         Placement::Custom { .. }
     ));
 
-    state.set_selected_placement(Placement::Custom {
-        x: 2,
-        y: 3,
-        width: 20,
-        height: 10,
-    });
-    state.cycle_selected_placement(1);
+    state
+        .set_selected_placement(
+            Placement::Custom {
+                x: 2,
+                y: 3,
+                width: 20,
+                height: 10,
+            },
+            &registry,
+        )
+        .unwrap();
+    state.cycle_selected_placement(1, &registry).unwrap();
     assert_eq!(state.selected_instance().placement, Placement::Center);
+}
+
+#[test]
+fn tui_state_can_edit_custom_placement_fields() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state
+        .set_selected_placement(
+            Placement::Custom {
+                x: 2,
+                y: 3,
+                width: 20,
+                height: 10,
+            },
+            &registry,
+        )
+        .unwrap();
+
+    state.select_option_by_name("placement-x").unwrap();
+    state.adjust_selected_option(3).unwrap();
+    state.select_option_by_name("placement-y").unwrap();
+    state.adjust_selected_option(-10).unwrap();
+    state.select_option_by_name("placement-width").unwrap();
+    state.adjust_selected_option(-25).unwrap();
+    state.select_option_by_name("placement-height").unwrap();
+    state.adjust_selected_option(5).unwrap();
+
+    assert_eq!(
+        state.selected_instance().placement,
+        Placement::Custom {
+            x: 5,
+            y: 0,
+            width: 1,
+            height: 15,
+        }
+    );
 }
 
 #[test]

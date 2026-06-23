@@ -6,7 +6,7 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
-use crate::presets::{OptionValue, PresetDescriptor, PresetRegistry};
+use crate::presets::PresetRegistry;
 use crate::render::ansi::render_to_ansi;
 use crate::render::buffer::FrameBuffer;
 use crate::render::layout::resolve_placement;
@@ -70,8 +70,7 @@ pub fn render_scene_frame(
             continue;
         }
         let descriptor = registry.get(&instance.preset)?;
-        let (desired_width, desired_height) =
-            desired_dimensions(instance, descriptor, width, height);
+        let (desired_width, desired_height) = desired_dimensions(instance, width, height);
         let rect = resolve_placement(
             &instance.placement,
             width,
@@ -174,49 +173,13 @@ fn should_exit_scene_loop(event: &Event) -> bool {
 
 fn desired_dimensions(
     instance: &AnimationInstance,
-    descriptor: &PresetDescriptor,
     frame_width: u16,
     frame_height: u16,
 ) -> (u16, u16) {
-    if matches!(
-        instance.placement,
-        Placement::Fill | Placement::Custom { .. }
-    ) {
-        return (frame_width, frame_height);
+    match instance.placement {
+        Placement::Fill | Placement::Custom { .. } => (frame_width, frame_height),
+        _ => (frame_width, frame_height),
     }
-
-    let Some(size_percent) = instance
-        .options
-        .get("size")
-        .and_then(int_option)
-        .or_else(|| default_int_option(descriptor, "size"))
-    else {
-        return (frame_width, frame_height);
-    };
-
-    (
-        scaled_dimension(frame_width, size_percent),
-        scaled_dimension(frame_height, size_percent),
-    )
-}
-
-fn default_int_option(descriptor: &PresetDescriptor, name: &str) -> Option<u16> {
-    descriptor
-        .options()
-        .iter()
-        .find(|option| option.name() == name)
-        .and_then(|option| int_option(option.default()))
-}
-
-fn int_option(value: &OptionValue) -> Option<u16> {
-    match value {
-        OptionValue::Int(value) => u16::try_from(*value).ok(),
-        _ => None,
-    }
-}
-
-fn scaled_dimension(total: u16, percent: u16) -> u16 {
-    ((total as u32 * percent as u32) / 100).max(1) as u16
 }
 
 fn restore_scene_terminal<W: Write, T: TerminalDriver>(
@@ -299,6 +262,23 @@ mod tests {
             color: false,
             instances: Vec::new(),
         }
+    }
+
+    #[test]
+    fn desired_dimensions_ignore_preset_size_option() {
+        let mut options = std::collections::BTreeMap::new();
+        options.insert("size".to_string(), crate::presets::OptionValue::Int(20));
+        let instance = AnimationInstance {
+            id: "galaxy-1".to_string(),
+            preset: "galaxy".to_string(),
+            options,
+            placement: Placement::Right,
+            layer: crate::scene::Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        };
+
+        assert_eq!(desired_dimensions(&instance, 40, 16), (40, 16));
     }
 
     #[test]

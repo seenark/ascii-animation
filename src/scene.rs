@@ -81,6 +81,19 @@ impl Scene {
             .unwrap_or_else(|| PathBuf::from(".config/ascii-animation/scene.toml"))
     }
 
+    pub fn load_default_config_if_available() -> Result<Option<Self>> {
+        let path = Self::default_config_path();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(_) => return Ok(None),
+        };
+        let scene: Self = toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
+            path: path.clone(),
+            source,
+        })?;
+        scene.validate().map(Some)
+    }
+
     pub fn load_from_path(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|source| AsciiAnimError::Terminal(source.to_string()))?;

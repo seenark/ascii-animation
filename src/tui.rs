@@ -26,6 +26,11 @@ pub struct TuiState {
     option_kinds: Vec<OptionKind>,
 }
 
+const CUSTOM_X_OPTION: &str = "placement-x";
+const CUSTOM_Y_OPTION: &str = "placement-y";
+const CUSTOM_WIDTH_OPTION: &str = "placement-width";
+const CUSTOM_HEIGHT_OPTION: &str = "placement-height";
+
 impl TuiState {
     pub fn default_with_registry(registry: &PresetRegistry) -> Result<Self> {
         let mut state = Self {
@@ -40,6 +45,25 @@ impl TuiState {
             option_kinds: Vec::new(),
         };
         state.add_instance("galaxy", registry)?;
+        Ok(state)
+    }
+
+    pub fn load_startup(registry: &PresetRegistry) -> Result<Self> {
+        match Scene::load_default_config_if_available()? {
+            Some(scene) => Self::from_scene(scene, registry),
+            None => Self::default_with_registry(registry),
+        }
+    }
+
+    fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
+        let mut state = Self {
+            scene,
+            selected_instance: 0,
+            selected_option: 0,
+            option_names: Vec::new(),
+            option_kinds: Vec::new(),
+        };
+        state.sync_selected_options(registry)?;
         Ok(state)
     }
 
@@ -129,11 +153,20 @@ impl TuiState {
         self.sync_selected_options(registry)
     }
 
-    pub fn set_selected_placement(&mut self, placement: Placement) {
+    pub fn set_selected_placement(
+        &mut self,
+        placement: Placement,
+        registry: &PresetRegistry,
+    ) -> Result<()> {
         self.selected_instance_mut().placement = placement;
+        self.sync_selected_options(registry)
     }
 
-    pub fn cycle_selected_placement(&mut self, delta: i32) {
+    pub fn cycle_selected_placement(
+        &mut self,
+        delta: i32,
+        registry: &PresetRegistry,
+    ) -> Result<()> {
         let custom = match &self.selected_instance().placement {
             Placement::Custom {
                 x,
@@ -168,6 +201,7 @@ impl TuiState {
         };
         let next = (current + delta).rem_euclid(placements.len() as i32) as usize;
         self.selected_instance_mut().placement = placements[next].clone();
+        self.sync_selected_options(registry)
     }
 
     pub fn cycle_selected_layer(&mut self, delta: i32) {
@@ -224,6 +258,13 @@ impl TuiState {
 
         let option_name = self.option_names[self.selected_option].clone();
         let option_kind = self.option_kinds[self.selected_option].clone();
+        {
+            let instance = self.selected_instance_mut();
+            if adjust_custom_placement(&mut instance.placement, &option_name, delta) {
+                return Ok(());
+            }
+        }
+
         let instance = self.selected_instance_mut();
         let current = instance.options.get(&option_name).cloned().ok_or_else(|| {
             AsciiAnimError::UnknownOption {
@@ -256,11 +297,25 @@ impl TuiState {
         let preset = self.selected_instance().preset.clone();
         let descriptor = registry.get(&preset)?;
         let validated = descriptor.validate_options(&self.selected_instance().options)?;
-        let (option_names, option_kinds): (Vec<_>, Vec<_>) = descriptor
+        let (mut option_names, mut option_kinds): (Vec<_>, Vec<_>) = descriptor
             .options()
             .iter()
             .map(|option| (option.name().to_string(), option.kind().clone()))
             .unzip();
+        if matches!(self.selected_instance().placement, Placement::Custom { .. }) {
+            option_names.extend([
+                CUSTOM_X_OPTION.to_string(),
+                CUSTOM_Y_OPTION.to_string(),
+                CUSTOM_WIDTH_OPTION.to_string(),
+                CUSTOM_HEIGHT_OPTION.to_string(),
+            ]);
+            option_kinds.extend([
+                custom_placement_option_kind(CUSTOM_X_OPTION),
+                custom_placement_option_kind(CUSTOM_Y_OPTION),
+                custom_placement_option_kind(CUSTOM_WIDTH_OPTION),
+                custom_placement_option_kind(CUSTOM_HEIGHT_OPTION),
+            ]);
+        }
         self.selected_instance_mut().options = validated;
         self.option_names = option_names;
         self.option_kinds = option_kinds;
@@ -286,7 +341,7 @@ pub fn run(registry: &PresetRegistry) -> Result<()> {
     };
 
     let result = (|| {
-        let mut state = TuiState::default_with_registry(registry)?;
+        let mut state = TuiState::load_startup(registry)?;
         run_loop(&mut terminal, registry, &mut state, Instant::now())
     })();
     let restore_result = restore_tui_terminal(&mut terminal);
@@ -358,7 +413,9 @@ fn run_loop(
                     let value = instance
                         .options
                         .get(name)
-                        .map(OptionValue::as_cli_value)
+                        .cloned()
+                        .or_else(|| custom_placement_option_value(&instance.placement, name))
+                        .map(|value| value.as_cli_value())
                         .unwrap_or_default();
                     lines.push(Line::from(format!("{} {} = {}", marker, name, value)));
                 }
@@ -403,8 +460,12 @@ fn run_loop(
                 Event::Key(key) if key.code == KeyCode::Char('P') => {
                     state.cycle_selected_preset(registry, -1)?
                 }
-                Event::Key(key) if key.code == KeyCode::Char('m') => state.cycle_selected_placement(1),
-                Event::Key(key) if key.code == KeyCode::Char('M') => state.cycle_selected_placement(-1),
+                Event::Key(key) if key.code == KeyCode::Char('m') => {
+                    state.cycle_selected_placement(1, registry)?
+                }
+                Event::Key(key) if key.code == KeyCode::Char('M') => {
+                    state.cycle_selected_placement(-1, registry)?
+                }
                 Event::Key(key) if key.code == KeyCode::Char('l') => state.cycle_selected_layer(1),
                 Event::Key(key) if key.code == KeyCode::Char('L') => state.cycle_selected_layer(-1),
                 Event::Key(key) if key.code == KeyCode::Char(']') => state.adjust_selected_z_index(1),
@@ -451,6 +512,63 @@ fn default_custom_placement() -> Placement {
         width: 40,
         height: 12,
     }
+}
+
+fn custom_placement_option_kind(name: &str) -> OptionKind {
+    match name {
+        CUSTOM_X_OPTION | CUSTOM_Y_OPTION => OptionKind::Int {
+            min: 0,
+            max: i64::from(u16::MAX),
+        },
+        CUSTOM_WIDTH_OPTION | CUSTOM_HEIGHT_OPTION => OptionKind::Int {
+            min: 1,
+            max: i64::from(u16::MAX),
+        },
+        _ => unreachable!("unknown custom placement option"),
+    }
+}
+
+fn custom_placement_option_value(placement: &Placement, name: &str) -> Option<OptionValue> {
+    let Placement::Custom {
+        x,
+        y,
+        width,
+        height,
+    } = placement
+    else {
+        return None;
+    };
+    match name {
+        CUSTOM_X_OPTION => Some(OptionValue::Int(i64::from(*x))),
+        CUSTOM_Y_OPTION => Some(OptionValue::Int(i64::from(*y))),
+        CUSTOM_WIDTH_OPTION => Some(OptionValue::Int(i64::from(*width))),
+        CUSTOM_HEIGHT_OPTION => Some(OptionValue::Int(i64::from(*height))),
+        _ => None,
+    }
+}
+
+fn adjust_custom_placement(placement: &mut Placement, name: &str, delta: i32) -> bool {
+    let Placement::Custom {
+        x,
+        y,
+        width,
+        height,
+    } = placement
+    else {
+        return false;
+    };
+    let clamp = |value: u16, min: u16| -> u16 {
+        (i64::from(value) + i64::from(delta))
+            .clamp(i64::from(min), i64::from(u16::MAX)) as u16
+    };
+    match name {
+        CUSTOM_X_OPTION => *x = clamp(*x, 0),
+        CUSTOM_Y_OPTION => *y = clamp(*y, 0),
+        CUSTOM_WIDTH_OPTION => *width = clamp(*width, 1),
+        CUSTOM_HEIGHT_OPTION => *height = clamp(*height, 1),
+        _ => return false,
+    }
+    true
 }
 
 fn layer_label(layer: Layer) -> &'static str {
