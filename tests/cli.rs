@@ -6,6 +6,8 @@ use clap::Parser;
 
 use ascii_animation::cli::{scene_from_run_args, Cli, Command};
 use ascii_animation::presets::{build_default_registry, OptionValue};
+use ascii_animation::render::ansi::render_to_ansi;
+use ascii_animation::runtime::render_scene_frame;
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
@@ -117,4 +119,18 @@ fn rejects_invalid_galaxy_option_range() {
     let err = scene_from_run_args(&args, &build_default_registry()).unwrap_err().to_string();
 
     assert_eq!(err, "option `arms` is out of range: expected 1..=10, got 99");
+}
+
+#[test]
+fn direct_scene_renders_non_empty_frame() {
+    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--stars", "100", "--no-color"]);
+    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let registry = build_default_registry();
+    let scene = scene_from_run_args(&args, &registry).unwrap();
+
+    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
+    let text = render_to_ansi(&frame, false);
+
+    assert_eq!(text.lines().count(), 16);
+    assert!(text.chars().any(|ch| ch != ' ' && ch != '\n'));
 }
