@@ -224,6 +224,10 @@ impl Default for PresetRegistry {
     }
 }
 
+pub fn build_default_registry() -> PresetRegistry {
+    PresetRegistry::new(vec![galaxy::descriptor()])
+}
+
 fn trim_float(value: f64) -> String {
     let mut text = value.to_string();
     if text.contains('.') {
