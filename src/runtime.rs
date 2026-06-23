@@ -12,7 +12,11 @@ use crate::render::buffer::FrameBuffer;
 use crate::render::layout::resolve_placement;
 use crate::render::RenderContext;
 use crate::scene::{AnimationInstance, Placement, Scene};
+use crate::viewport::animation_viewport_size_for_terminal;
 use crate::{AsciiAnimError, Result};
+
+pub const DEFAULT_SCENE_WIDTH: u16 = 110;
+pub const DEFAULT_SCENE_HEIGHT: u16 = 46;
 
 pub trait TerminalDriver {
     fn enable_raw_mode(&mut self) -> io::Result<()>;
@@ -97,6 +101,47 @@ pub fn render_scene_frame(
     Ok(frame)
 }
 
+pub fn render_centered_scene_frame(
+    scene: &Scene,
+    registry: &PresetRegistry,
+    seed: u64,
+    elapsed_seconds: f64,
+    viewport_width: u16,
+    viewport_height: u16,
+) -> Result<FrameBuffer> {
+    let logical = render_scene_frame(
+        scene,
+        registry,
+        seed,
+        elapsed_seconds,
+        DEFAULT_SCENE_WIDTH,
+        DEFAULT_SCENE_HEIGHT,
+    )?;
+    Ok(center_frame(&logical, viewport_width, viewport_height))
+}
+
+fn center_frame(source: &FrameBuffer, viewport_width: u16, viewport_height: u16) -> FrameBuffer {
+    let mut frame = FrameBuffer::new(viewport_width, viewport_height);
+    let copy_width = source.width().min(viewport_width);
+    let copy_height = source.height().min(viewport_height);
+    let source_x = source.width().saturating_sub(copy_width) / 2;
+    let source_y = source.height().saturating_sub(copy_height) / 2;
+    let dest_x = viewport_width.saturating_sub(copy_width) / 2;
+    let dest_y = viewport_height.saturating_sub(copy_height) / 2;
+
+    for y in 0..copy_height {
+        for x in 0..copy_width {
+            if let Some(cell) = source.get(source_x + x, source_y + y) {
+                if cell.ch != ' ' {
+                    frame.put_cell(dest_x + x, dest_y + y, *cell);
+                }
+            }
+        }
+    }
+
+    frame
+}
+
 pub fn prepare_scene_terminal<W: Write, T: TerminalDriver>(
     stdout: &mut W,
     terminal: &mut T,
@@ -125,6 +170,21 @@ pub fn run_scene(scene: Scene, registry: &PresetRegistry, seed: u64) -> Result<(
     result.and(restore_result)
 }
 
+fn write_positioned_frame<W: Write>(
+    stdout: &mut W,
+    frame: &FrameBuffer,
+    color: bool,
+    x_offset: u16,
+    y_offset: u16,
+) -> Result<()> {
+    let output = render_to_ansi(frame, color);
+    for (row, line) in output.lines().enumerate() {
+        execute!(stdout, MoveTo(x_offset, y_offset + row as u16)).map_err(terminal_error)?;
+        write!(stdout, "{}", line).map_err(terminal_error)?;
+    }
+    Ok(())
+}
+
 fn run_scene_loop<W: Write, T: TerminalDriver>(
     stdout: &mut W,
     terminal: &mut T,
@@ -144,18 +204,21 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
             break;
         }
 
-        let (width, height) = terminal.size().map_err(terminal_error)?;
-        let frame = render_scene_frame(
+        let (terminal_width, terminal_height) = terminal.size().map_err(terminal_error)?;
+        let (viewport_width, viewport_height) =
+            animation_viewport_size_for_terminal(terminal_width, terminal_height);
+        let frame = render_centered_scene_frame(
             &scene,
             registry,
             seed,
             start.elapsed().as_secs_f64(),
-            width,
-            height,
+            viewport_width,
+            viewport_height,
         )?;
-        let output = render_to_ansi(&frame, scene.color);
+        let x_offset = terminal_width.saturating_sub(viewport_width) / 2;
+        let y_offset = terminal_height.saturating_sub(viewport_height) / 2;
         execute!(stdout, MoveTo(0, 0), Clear(ClearType::All)).map_err(terminal_error)?;
-        write!(stdout, "{}", output).map_err(terminal_error)?;
+        write_positioned_frame(stdout, &frame, scene.color, x_offset, y_offset)?;
         stdout.flush().map_err(terminal_error)?;
         std::thread::sleep(frame_duration);
     }
@@ -216,8 +279,9 @@ mod tests {
     struct LoopTerminal {
         events: VecDeque<Event>,
         size_calls: usize,
+        width: u16,
+        height: u16,
     }
-
     impl TerminalDriver for LoopTerminal {
         fn enable_raw_mode(&mut self) -> io::Result<()> {
             Ok(())
@@ -247,7 +311,7 @@ mod tests {
 
         fn size(&mut self) -> io::Result<(u16, u16)> {
             self.size_calls += 1;
-            Ok((20, 8))
+            Ok((self.width, self.height))
         }
     }
 
@@ -311,6 +375,8 @@ mod tests {
                 key(KeyCode::Char('c'), KeyModifiers::CONTROL),
             ]),
             size_calls: 0,
+            width: 20,
+            height: 8,
         };
 
         run_scene_loop(&mut stdout, &mut terminal, scene(), &registry, 1).unwrap();
@@ -328,11 +394,89 @@ mod tests {
                 key(KeyCode::Char('c'), KeyModifiers::CONTROL),
             ]),
             size_calls: 0,
+            width: 20,
+            height: 8,
         };
 
         run_scene_loop(&mut stdout, &mut terminal, scene(), &registry, 1).unwrap();
 
         assert_eq!(terminal.size_calls, 1);
+    }
+
+    #[derive(Debug)]
+    struct FillRenderer;
+
+    impl crate::render::AnimationRenderer for FillRenderer {
+        fn render(&mut self, frame: &mut FrameBuffer, context: RenderContext) {
+            for y in 0..context.height {
+                for x in 0..context.width {
+                    frame.put_cell(
+                        context.x_offset + x,
+                        context.y_offset + y,
+                        crate::render::buffer::Cell::visible(
+                            '#',
+                            None,
+                            context.layer,
+                            context.z_index,
+                            context.order,
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    fn fill_renderer(
+        _options: &std::collections::BTreeMap<String, crate::presets::OptionValue>,
+        _seed: u64,
+    ) -> Result<Box<dyn crate::render::AnimationRenderer>> {
+        Ok(Box::new(FillRenderer))
+    }
+
+    #[test]
+    fn run_scene_loop_uses_tui_preview_sized_viewport_centered_in_terminal() {
+        let registry = PresetRegistry::new(vec![crate::presets::PresetDescriptor::new(
+            "fill",
+            "Fill",
+            "Fill test renderer",
+            vec![],
+            fill_renderer,
+        )]);
+        let scene = Scene {
+            frame_rate: 1000,
+            color: false,
+            instances: vec![AnimationInstance {
+                id: "fill-1".to_string(),
+                preset: "fill".to_string(),
+                options: std::collections::BTreeMap::new(),
+                placement: Placement::Fill,
+                layer: crate::scene::Layer::Normal,
+                z_index: 0,
+                enabled: true,
+            }],
+        };
+        let mut stdout = Vec::new();
+        let mut terminal = LoopTerminal {
+            events: VecDeque::from([
+                key(KeyCode::Char('q'), KeyModifiers::NONE),
+                key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            ]),
+            size_calls: 0,
+            width: 120,
+            height: 40,
+        };
+
+        run_scene_loop(&mut stdout, &mut terminal, scene, &registry, 1).unwrap();
+        let output = String::from_utf8(stdout).unwrap();
+        let layout = crate::tui::tui_layout(ratatui::layout::Rect::new(0, 0, 120, 40));
+        let viewport_width = layout.preview.width.saturating_sub(2).max(1);
+        let viewport_height = layout.preview.height.saturating_sub(2).max(1);
+        let expected_x = (120 - viewport_width) / 2 + 1;
+        let expected_y = (40 - viewport_height) / 2 + 1;
+        let expected_move = format!("\u{1b}[{expected_y};{expected_x}H");
+
+        assert!(output.contains(&expected_move));
+        assert!(!output.contains("\u{1b}[2;1H"));
     }
 
     #[test]
@@ -342,6 +486,8 @@ mod tests {
         let mut terminal = LoopTerminal {
             events: VecDeque::from([key(KeyCode::Char('c'), KeyModifiers::CONTROL)]),
             size_calls: 0,
+            width: 20,
+            height: 8,
         };
 
         run_scene_loop(&mut stdout, &mut terminal, scene(), &registry, 1).unwrap();

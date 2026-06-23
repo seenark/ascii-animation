@@ -47,7 +47,6 @@ pub enum AsciiAnimError {
     #[error("scene must contain at least one animation instance")]
     EmptyScene,
 
-
     #[error("failed to parse scene config at {path}: {source}")]
     SceneConfigParse {
         path: PathBuf,
@@ -61,7 +60,6 @@ pub enum AsciiAnimError {
         #[source]
         source: std::io::Error,
     },
-
 
     #[error("clipboard error: {0}")]
     Clipboard(String),

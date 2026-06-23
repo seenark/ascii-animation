@@ -139,9 +139,7 @@ impl OptionDescriptor {
     fn validate(&self, preset: &str, value: OptionValue) -> Result<OptionValue> {
         match (&self.kind, value) {
             (OptionKind::Int { min, max, step }, OptionValue::Int(value))
-                if value >= *min
-                    && value <= *max
-                    && ((value - *min) % *step == 0) =>
+                if value >= *min && value <= *max && ((value - *min) % *step == 0) =>
             {
                 Ok(OptionValue::Int(value))
             }

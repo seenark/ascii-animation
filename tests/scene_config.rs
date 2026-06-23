@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 use ascii_animation::tui::TuiState;
+use ascii_animation::viewport::animation_viewport_size_for_terminal;
 use ascii_animation::AsciiAnimError;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::layout::Rect;
@@ -308,7 +309,10 @@ fn tui_state_export_command_leaves_unsaved_config_scene_stale() {
         None => env::remove_var("HOME"),
     }
 
-    assert_eq!(command, "ascii-animation run --config ~/.config/ascii-animation/scene.toml");
+    assert_eq!(
+        command,
+        "ascii-animation run --config ~/.config/ascii-animation/scene.toml"
+    );
     assert_eq!(exported_scene, saved_scene);
     assert_ne!(exported_scene, state.scene);
     assert_eq!(
@@ -439,7 +443,6 @@ fn load_from_path_rejects_empty_scenes() {
     assert!(matches!(err, AsciiAnimError::EmptyScene));
 }
 
-
 #[test]
 fn tui_state_starts_with_galaxy_and_exports_command() {
     let registry = build_default_registry();
@@ -464,7 +467,6 @@ fn tui_layout_places_options_on_left_and_preview_on_right() {
     assert_eq!(layout.preview.height, 40);
 }
 
-
 #[test]
 fn tui_copy_hotkey_returns_whole_export_command() {
     let registry = build_default_registry();
@@ -479,7 +481,10 @@ fn tui_copy_hotkey_returns_whole_export_command() {
 
     let action = ascii_animation::tui::handle_tui_key(&mut state, key_event, &registry).unwrap();
 
-    assert_eq!(action, ascii_animation::tui::TuiAction::CopyCommand(expected));
+    assert_eq!(
+        action,
+        ascii_animation::tui::TuiAction::CopyCommand(expected)
+    );
 }
 
 #[test]
@@ -686,6 +691,51 @@ fn tui_state_can_edit_custom_placement_fields() {
     );
 }
 
+fn ratatui_text_to_plain_text(text: ratatui::text::Text<'_>) -> String {
+    text.lines
+        .into_iter()
+        .map(|line| {
+            line.spans
+                .into_iter()
+                .map(|span| span.content.into_owned())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn shared_animation_viewport_matches_tui_preview_inner_size() {
+    let layout = ascii_animation::tui::tui_layout(Rect::new(0, 0, 120, 40));
+
+    assert_eq!(
+        animation_viewport_size_for_terminal(120, 40),
+        (
+            layout.preview.width.saturating_sub(2).max(1),
+            layout.preview.height.saturating_sub(2).max(1),
+        )
+    );
+}
+
+#[test]
+fn tui_preview_uses_same_centered_viewport_as_direct_run() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.scene.color = false;
+
+    let preview = state.preview_text(&registry, 0.0, 40, 16);
+    let runtime = ascii_animation::runtime::render_centered_scene_frame(
+        &state.scene,
+        &registry,
+        0,
+        0.0,
+        40,
+        16,
+    )
+    .unwrap();
+
+    assert_eq!(ratatui_text_to_plain_text(preview), runtime.to_plain_text());
+}
 #[test]
 fn tui_preview_uses_ratatui_styles_for_color_output() {
     let registry = build_default_registry();

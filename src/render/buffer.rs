@@ -34,7 +34,13 @@ impl Cell {
     }
 
     pub fn visible(ch: char, color: Option<Rgb>, layer: Layer, z_index: i32, order: usize) -> Self {
-        Self { ch, color, layer, z_index, order }
+        Self {
+            ch,
+            color,
+            layer,
+            z_index,
+            order,
+        }
     }
 
     fn is_transparent(self) -> bool {
@@ -72,8 +78,12 @@ impl FrameBuffer {
         }
     }
 
-    pub fn width(&self) -> u16 { self.width }
-    pub fn height(&self) -> u16 { self.height }
+    pub fn width(&self) -> u16 {
+        self.width
+    }
+    pub fn height(&self) -> u16 {
+        self.height
+    }
 
     pub fn put_cell(&mut self, x: u16, y: u16, cell: Cell) {
         if x >= self.width || y >= self.height {

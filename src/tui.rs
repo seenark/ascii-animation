@@ -7,7 +7,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -15,8 +15,9 @@ use ratatui::Terminal;
 
 use crate::presets::{OptionKind, OptionValue, PresetRegistry};
 use crate::render::buffer::FrameBuffer;
-use crate::runtime::render_scene_frame;
+use crate::runtime::render_centered_scene_frame;
 use crate::scene::{AnimationInstance, Layer, Placement, Scene};
+use crate::viewport::{animation_viewport_size_for_terminal, split_tui_layout};
 use crate::{AsciiAnimError, Result};
 
 pub struct TuiState {
@@ -37,15 +38,9 @@ pub struct TuiLayout {
 }
 
 pub fn tui_layout(area: Rect) -> TuiLayout {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-        .split(area);
+    let (options, preview) = split_tui_layout(area);
 
-    TuiLayout {
-        options: chunks[0],
-        preview: chunks[1],
-    }
+    TuiLayout { options, preview }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,7 +162,7 @@ impl TuiState {
         width: u16,
         height: u16,
     ) -> Text<'static> {
-        render_scene_frame(&self.scene, registry, 0, elapsed_secs, width, height)
+        render_centered_scene_frame(&self.scene, registry, 0, elapsed_secs, width, height)
             .map(|buffer| frame_to_text(&buffer, self.scene.color))
             .unwrap_or_else(|err| Text::from(err.to_string()))
     }
@@ -204,11 +199,7 @@ impl TuiState {
         self.sync_selected_options(registry)
     }
 
-    pub fn cycle_selected_instance(
-        &mut self,
-        delta: i32,
-        registry: &PresetRegistry,
-    ) -> Result<()> {
+    pub fn cycle_selected_instance(&mut self, delta: i32, registry: &PresetRegistry) -> Result<()> {
         if self.scene.instances.is_empty() {
             return Ok(());
         }
@@ -218,11 +209,7 @@ impl TuiState {
         self.sync_selected_options(registry)
     }
 
-    pub fn cycle_selected_preset(
-        &mut self,
-        registry: &PresetRegistry,
-        delta: i32,
-    ) -> Result<()> {
+    pub fn cycle_selected_preset(&mut self, registry: &PresetRegistry, delta: i32) -> Result<()> {
         let preset_names: Vec<_> = registry.names().collect();
         if preset_names.is_empty() {
             return Ok(());
@@ -235,7 +222,11 @@ impl TuiState {
             .unwrap_or(0) as i32;
         let next_preset =
             preset_names[(current_index + delta).rem_euclid(preset_names.len() as i32) as usize];
-        let next_id = next_instance_id(&self.scene.instances, next_preset, Some(self.selected_instance));
+        let next_id = next_instance_id(
+            &self.scene.instances,
+            next_preset,
+            Some(self.selected_instance),
+        );
         let descriptor = registry.get(next_preset)?;
         let instance = self.selected_instance_mut();
         instance.id = next_id;
@@ -271,7 +262,8 @@ impl TuiState {
             Placement::Custom { .. } => 6,
         };
         if let Placement::Custom { .. } = &self.selected_instance().placement {
-            self.custom_placements[self.selected_instance] = self.selected_instance().placement.clone();
+            self.custom_placements[self.selected_instance] =
+                self.selected_instance().placement.clone();
         }
         let placements = [
             Placement::Center,
@@ -404,7 +396,9 @@ impl TuiState {
         self.selected_instance_mut().options = validated;
         self.option_names = option_names;
         self.option_kinds = option_kinds;
-        self.selected_option = self.selected_option.min(self.option_names.len().saturating_sub(1));
+        self.selected_option = self
+            .selected_option
+            .min(self.option_names.len().saturating_sub(1));
         Ok(())
     }
 }
@@ -536,8 +530,8 @@ fn run_loop(
             .draw(|frame| {
                 let layout = tui_layout(frame.area());
 
-                let preview_width = layout.preview.width.saturating_sub(2).max(1);
-                let preview_height = layout.preview.height.saturating_sub(2).max(1);
+                let (preview_width, preview_height) =
+                    animation_viewport_size_for_terminal(frame.area().width, frame.area().height);
                 let preview = state.preview_text(
                     registry,
                     started.elapsed().as_secs_f64(),
@@ -573,7 +567,11 @@ fn run_loop(
                     Line::from("Instances:"),
                 ];
                 for (index, scene_instance) in state.scene.instances.iter().enumerate() {
-                    let marker = if index == state.selected_instance { ">" } else { " " };
+                    let marker = if index == state.selected_instance {
+                        ">"
+                    } else {
+                        " "
+                    };
                     lines.push(Line::from(format!(
                         "{} {} ({})",
                         marker, scene_instance.id, scene_instance.preset
@@ -582,7 +580,11 @@ fn run_loop(
                 lines.push(Line::from(""));
                 lines.push(Line::from("Options:"));
                 for (index, name) in state.option_names.iter().enumerate() {
-                    let marker = if index == state.selected_option { ">" } else { " " };
+                    let marker = if index == state.selected_option {
+                        ">"
+                    } else {
+                        " "
+                    };
                     let value = instance
                         .options
                         .get(name)
@@ -632,9 +634,10 @@ fn next_instance_id(instances: &[AnimationInstance], preset: &str, skip: Option<
     let mut suffix = 1;
     loop {
         let candidate = format!("{}-{}", preset, suffix);
-        let exists = instances.iter().enumerate().any(|(index, instance)| {
-            skip != Some(index) && instance.id == candidate
-        });
+        let exists = instances
+            .iter()
+            .enumerate()
+            .any(|(index, instance)| skip != Some(index) && instance.id == candidate);
         if !exists {
             return candidate;
         }
@@ -709,8 +712,7 @@ fn adjust_custom_placement(placement: &mut Placement, name: &str, delta: i32) ->
         return false;
     };
     let clamp = |value: u16, min: u16| -> u16 {
-        (i64::from(value) + i64::from(delta))
-            .clamp(i64::from(min), i64::from(u16::MAX)) as u16
+        (i64::from(value) + i64::from(delta)).clamp(i64::from(min), i64::from(u16::MAX)) as u16
     };
     match name {
         CUSTOM_X_OPTION => *x = clamp(*x, 0),
@@ -759,7 +761,10 @@ fn frame_to_text(frame: &FrameBuffer, color: bool) -> Text<'static> {
             if spans.is_empty() && current_text.is_empty() {
                 current_style = style;
             } else if style != current_style {
-                spans.push(Span::styled(std::mem::take(&mut current_text), current_style));
+                spans.push(Span::styled(
+                    std::mem::take(&mut current_text),
+                    current_style,
+                ));
                 current_style = style;
             }
 

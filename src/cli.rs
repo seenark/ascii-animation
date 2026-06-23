@@ -102,7 +102,9 @@ where
 {
     let matches = cli_command_for(registry).try_get_matches_from(args)?;
     match matches.subcommand() {
-        Some(("run", run_matches)) => Ok(ParsedCommand::Run(parse_run_matches(run_matches, registry))),
+        Some(("run", run_matches)) => {
+            Ok(ParsedCommand::Run(parse_run_matches(run_matches, registry)))
+        }
         Some(("tui", _)) => Ok(ParsedCommand::Tui),
         _ => anyhow::bail!("expected subcommand"),
     }
@@ -129,7 +131,9 @@ fn parse_run_matches(matches: &ArgMatches, registry: &PresetRegistry) -> RunArgs
             }
             if let Some(value) = descriptor_value_from_matches(matches, option) {
                 parsed.direct_inputs.push(format!("--{}", option.name()));
-                parsed.direct_options.insert(option.name().to_string(), value);
+                parsed
+                    .direct_options
+                    .insert(option.name().to_string(), value);
             }
         }
     }
@@ -137,11 +141,20 @@ fn parse_run_matches(matches: &ArgMatches, registry: &PresetRegistry) -> RunArgs
     parsed
 }
 
-fn descriptor_value_from_matches(matches: &ArgMatches, option: &OptionDescriptor) -> Option<String> {
+fn descriptor_value_from_matches(
+    matches: &ArgMatches,
+    option: &OptionDescriptor,
+) -> Option<String> {
     match option.kind() {
-        OptionKind::Int { .. } => matches.get_one::<i64>(option.name()).map(ToString::to_string),
-        OptionKind::Float { .. } => matches.get_one::<f64>(option.name()).map(ToString::to_string),
-        OptionKind::Bool => matches.get_one::<bool>(option.name()).map(ToString::to_string),
+        OptionKind::Int { .. } => matches
+            .get_one::<i64>(option.name())
+            .map(ToString::to_string),
+        OptionKind::Float { .. } => matches
+            .get_one::<f64>(option.name())
+            .map(ToString::to_string),
+        OptionKind::Bool => matches
+            .get_one::<bool>(option.name())
+            .map(ToString::to_string),
         OptionKind::Choice { .. } => matches.get_one::<String>(option.name()).cloned(),
     }
 }
@@ -276,7 +289,10 @@ fn descriptor_option_values(
                 preset: descriptor.name().to_string(),
                 option: name.clone(),
             })?;
-        raw.insert(name.clone(), parse_descriptor_value(option.kind(), name, value)?);
+        raw.insert(
+            name.clone(),
+            parse_descriptor_value(option.kind(), name, value)?,
+        );
     }
 
     Ok(raw)
@@ -284,30 +300,27 @@ fn descriptor_option_values(
 
 fn parse_descriptor_value(kind: &OptionKind, name: &str, raw: &str) -> Result<OptionValue> {
     match kind {
-        OptionKind::Int { .. } => raw
-            .parse::<i64>()
-            .map(OptionValue::Int)
-            .map_err(|_| AsciiAnimError::InvalidOptionType {
+        OptionKind::Int { .. } => raw.parse::<i64>().map(OptionValue::Int).map_err(|_| {
+            AsciiAnimError::InvalidOptionType {
                 option: name.to_string(),
                 expected: "integer",
                 actual: raw.to_string(),
-            }),
-        OptionKind::Float { .. } => raw
-            .parse::<f64>()
-            .map(OptionValue::Float)
-            .map_err(|_| AsciiAnimError::InvalidOptionType {
+            }
+        }),
+        OptionKind::Float { .. } => raw.parse::<f64>().map(OptionValue::Float).map_err(|_| {
+            AsciiAnimError::InvalidOptionType {
                 option: name.to_string(),
                 expected: "float",
                 actual: raw.to_string(),
-            }),
-        OptionKind::Bool => raw
-            .parse::<bool>()
-            .map(OptionValue::Bool)
-            .map_err(|_| AsciiAnimError::InvalidOptionType {
+            }
+        }),
+        OptionKind::Bool => raw.parse::<bool>().map(OptionValue::Bool).map_err(|_| {
+            AsciiAnimError::InvalidOptionType {
                 option: name.to_string(),
                 expected: "bool",
                 actual: raw.to_string(),
-            }),
+            }
+        }),
         OptionKind::Choice { .. } => Ok(OptionValue::Choice(raw.to_string())),
     }
 }

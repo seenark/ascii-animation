@@ -34,7 +34,12 @@ pub enum Placement {
     Left,
     Right,
     Fill,
-    Custom { x: u16, y: u16, width: u16, height: u16 },
+    Custom {
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -55,7 +60,6 @@ impl AnimationInstance {
             && self.z_index == 0
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -88,20 +92,22 @@ impl Scene {
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(AsciiAnimError::Terminal(source.to_string())),
         };
-        let scene: Self = toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
-            path: path.clone(),
-            source,
-        })?;
+        let scene: Self =
+            toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
+                path: path.clone(),
+                source,
+            })?;
         scene.validate().map(Some)
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|source| AsciiAnimError::Terminal(source.to_string()))?;
-        let scene: Self = toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let scene: Self =
+            toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
+                path: path.to_path_buf(),
+                source,
+            })?;
         scene.validate()
     }
 

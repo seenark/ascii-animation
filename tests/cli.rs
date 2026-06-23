@@ -5,7 +5,9 @@ use std::sync::Mutex;
 use ascii_animation::cli::{parse_run_args_from, run_command_for, scene_from_run_args};
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::render::ansi::render_to_ansi;
-use ascii_animation::runtime::{prepare_scene_terminal, render_scene_frame, TerminalDriver};
+use ascii_animation::runtime::{
+    prepare_scene_terminal, render_centered_scene_frame, render_scene_frame, TerminalDriver,
+};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
@@ -623,6 +625,76 @@ fn render_scene_frame_respects_custom_placement() {
 
     assert!((0..20).all(|x| (0..16).all(|y| frame.get(x, y).unwrap().ch == ' ')));
     assert!((20..40).any(|x| (0..16).any(|y| frame.get(x, y).unwrap().ch != ' ')));
+}
+
+#[test]
+fn centered_runtime_viewport_crops_from_logical_scene_center() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![],
+            demo_renderer,
+        ),
+    ]);
+    let scene = Scene {
+        frame_rate: 24,
+        color: false,
+        instances: vec![AnimationInstance {
+            id: "demo-1".to_string(),
+            preset: "demo".to_string(),
+            options: BTreeMap::new(),
+            placement: Placement::Custom {
+                x: 54,
+                y: 22,
+                width: 2,
+                height: 2,
+            },
+            layer: Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        }],
+    };
+
+    let frame = render_centered_scene_frame(&scene, &registry, 1, 0.0, 10, 6).unwrap();
+
+    assert_filled_region(&frame, 4, 2, 2, 2);
+}
+
+#[test]
+fn centered_runtime_viewport_pads_logical_scene_center() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![],
+            demo_renderer,
+        ),
+    ]);
+    let scene = Scene {
+        frame_rate: 24,
+        color: false,
+        instances: vec![AnimationInstance {
+            id: "demo-1".to_string(),
+            preset: "demo".to_string(),
+            options: BTreeMap::new(),
+            placement: Placement::Custom {
+                x: 54,
+                y: 22,
+                width: 2,
+                height: 2,
+            },
+            layer: Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        }],
+    };
+
+    let frame = render_centered_scene_frame(&scene, &registry, 1, 0.0, 114, 50).unwrap();
+
+    assert_filled_region(&frame, 56, 24, 2, 2);
 }
 
 struct FailingTerminal {
