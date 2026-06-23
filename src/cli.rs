@@ -88,13 +88,17 @@ pub fn run() -> anyhow::Result<()> {
 pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<Scene> {
     if let Some(path) = &args.config {
         let mut scene = Scene::load_from_path(path)?;
-        scene.color = !args.no_color;
+        if args.no_color {
+            scene.color = false;
+        }
         return Ok(scene);
     }
 
     if args.scene.as_deref() == Some("default") {
         let mut scene = Scene::load_from_path(&Scene::default_config_path())?;
-        scene.color = !args.no_color;
+        if args.no_color {
+            scene.color = false;
+        }
         return Ok(scene);
     }
 
