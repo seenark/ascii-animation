@@ -64,6 +64,22 @@ fn multi_instance_exports_config_command() {
 }
 
 #[test]
+fn multi_instance_with_single_enabled_exports_config_command() {
+    let mut disabled = galaxy_instance("galaxy-1");
+    disabled.enabled = false;
+    let scene = Scene {
+        frame_rate: 30,
+        color: true,
+        instances: vec![disabled, galaxy_instance("galaxy-2")],
+    };
+
+    assert_eq!(
+        scene.export_command(),
+        "ascii-animation run --config ~/.config/ascii-animation/scene.toml"
+    );
+}
+
+#[test]
 fn default_config_path_uses_mandated_shape() {
     assert_eq!(
         Scene::default_config_path(),

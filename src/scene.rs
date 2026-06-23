@@ -99,7 +99,7 @@ impl Scene {
             .iter()
             .filter(|instance| instance.enabled)
             .collect();
-        if enabled.len() == 1 {
+        if self.instances.len() == 1 && enabled.len() == 1 {
             let instance = enabled[0];
             let mut command = format!("ascii-animation run {}", instance.preset);
             for (name, value) in &instance.options {
