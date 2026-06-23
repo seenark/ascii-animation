@@ -1,7 +1,7 @@
 # Task 10 Report
 
 ## Status
-DONE
+DONE_WITH_CONCERNS
 
 ## Summary
 - Rejected mixed direct-run inputs so `--scene`/`--config` now fail fast when combined with a positional preset or preset-specific flags instead of silently ignoring them.
@@ -58,7 +58,8 @@ DONE
 - TUI editing stays minimal but complete for the spec/review scope: keyboard-only controls expose scene structure without introducing unsupported config fields or extra preset abstractions.
 
 ## Concerns
-- None.
+- The worktree still contains unrelated pre-existing changes in `src/render/ansi.rs`, `src/render/buffer.rs`, `src/render/layout.rs`, `src/scene.rs`, `tests/galaxy.rs`, plus untracked `.superpowers/sdd/progress.md` and `target/`; they were left untouched.
 
 ## Commit
 - `ea5e0b4db9da8d47945d56665d14efeba837529b` — `fix: close final branch review gaps`
+- `816491948d4154d0db549e3e7c945852e78b5156` — `docs: add task 10 fix report`
