@@ -85,6 +85,27 @@ fn parses_direct_galaxy_command() {
 }
 
 #[test]
+fn leaves_seed_unset_when_flag_is_omitted() {
+    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy"]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
+
+    assert!(format!("{args:?}").contains("seed: None"));
+}
+
+#[test]
+fn parses_explicit_seed_value() {
+    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--seed", "17"]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
+
+    assert!(format!("{args:?}").contains("seed: Some(17)"));
+}
+
+
+#[test]
 fn preserves_config_scene_color_without_no_color() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("scene.toml");

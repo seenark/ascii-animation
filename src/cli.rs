@@ -70,8 +70,8 @@ pub struct RunArgs {
     #[arg(long)]
     pub gradient: Option<String>,
 
-    #[arg(long, default_value_t = 0)]
-    pub seed: u64,
+    #[arg(long)]
+    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -83,11 +83,22 @@ pub fn run() -> anyhow::Result<()> {
     match cli.command {
         Command::Run(args) => {
             let scene = scene_from_run_args(&args, &registry)?;
-            runtime::run_scene(scene, &registry, args.seed)?;
+            runtime::run_scene(scene, &registry, resolved_seed(args.seed))?;
         }
         Command::Tui(_) => tui::run(&registry)?,
     }
     Ok(())
+}
+
+fn resolved_seed(seed: Option<u64>) -> u64 {
+    resolve_seed_with(seed, rand::random::<u64>)
+}
+
+fn resolve_seed_with<F>(seed: Option<u64>, generate: F) -> u64
+where
+    F: FnOnce() -> u64,
+{
+    seed.unwrap_or_else(generate)
 }
 
 
@@ -211,5 +222,29 @@ fn insert_float(raw: &mut BTreeMap<String, OptionValue>, name: &str, value: Opti
 fn insert_choice(raw: &mut BTreeMap<String, OptionValue>, name: &str, value: Option<String>) {
     if let Some(value) = value {
         raw.insert(name.to_string(), OptionValue::Choice(value));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_seed_with;
+
+    #[test]
+    fn explicit_seed_bypasses_generator() {
+        let mut generated = false;
+        let seed = resolve_seed_with(Some(17), || {
+            generated = true;
+            42
+        });
+
+        assert_eq!(seed, 17);
+        assert!(!generated);
+    }
+
+    #[test]
+    fn omitted_seed_uses_generator() {
+        let seed = resolve_seed_with(None, || 42);
+
+        assert_eq!(seed, 42);
     }
 }
