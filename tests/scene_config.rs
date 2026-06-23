@@ -4,6 +4,7 @@ use std::path::Path;
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 use ascii_animation::tui::TuiState;
+use ratatui::style::Color;
 use ascii_animation::AsciiAnimError;
 
 fn galaxy_instance(id: &str) -> AnimationInstance {
@@ -236,14 +237,32 @@ fn tui_state_clamps_float_option_to_descriptor_bounds() {
 }
 
 #[test]
-fn tui_preview_uses_scene_color_flag() {
+fn tui_preview_uses_ratatui_styles_for_color_output() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
     let color_preview = state.preview_text(&registry, 0.0, 40, 16);
-    assert!(color_preview.contains("\u{1b}["));
+    let color_spans: Vec<_> = color_preview
+        .lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .collect();
+    assert!(color_spans.iter().any(|span| !span.content.contains("\u{1b}")));
+    assert!(
+        color_spans
+            .iter()
+            .any(|span| matches!(span.style.fg, Some(Color::Rgb(_, _, _))))
+    );
 
     state.scene.color = false;
     let monochrome_preview = state.preview_text(&registry, 0.0, 40, 16);
+    let monochrome_spans: Vec<_> = monochrome_preview
+        .lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .collect();
 
-    assert!(!monochrome_preview.contains("\u{1b}["));
+    assert!(monochrome_spans
+        .iter()
+        .all(|span| !span.content.contains("\u{1b}")));
+    assert!(monochrome_spans.iter().all(|span| span.style.fg.is_none()));
 }

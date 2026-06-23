@@ -7,12 +7,13 @@ use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::text::Line;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Terminal;
 
 use crate::presets::{OptionKind, OptionValue, PresetRegistry};
-use crate::render::ansi::render_to_ansi;
+use crate::render::buffer::FrameBuffer;
 use crate::runtime::render_scene_frame;
 use crate::scene::{AnimationInstance, Layer, Placement, Scene};
 use crate::{AsciiAnimError, Result};
@@ -64,10 +65,10 @@ impl TuiState {
         elapsed_secs: f64,
         width: u16,
         height: u16,
-    ) -> String {
+    ) -> Text<'static> {
         render_scene_frame(&self.scene, registry, 0, elapsed_secs, width, height)
-            .map(|buffer| render_to_ansi(&buffer, self.scene.color))
-            .unwrap_or_else(|err| err.to_string())
+            .map(|buffer| frame_to_text(&buffer, self.scene.color))
+            .unwrap_or_else(|err| Text::from(err.to_string()))
     }
 
 
@@ -233,6 +234,39 @@ fn restore_tui_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -
     let restore_err = execute!(terminal.backend_mut(), Show, LeaveAlternateScreen).err();
     let disable_err = terminal::disable_raw_mode().err();
     finish_tui_restore(restore_err, disable_err)
+}
+fn frame_to_text(frame: &FrameBuffer, color: bool) -> Text<'static> {
+    let mut lines = Vec::with_capacity(frame.height() as usize);
+    for y in 0..frame.height() {
+        let mut spans = Vec::new();
+        let mut current_style = Style::default();
+        let mut current_text = String::new();
+
+        for x in 0..frame.width() {
+            let cell = frame.get(x, y).expect("coordinates are inside frame");
+            let style = if color {
+                cell.color
+                    .map(|rgb| Style::default().fg(Color::Rgb(rgb.r, rgb.g, rgb.b)))
+                    .unwrap_or_default()
+            } else {
+                Style::default()
+            };
+
+            if spans.is_empty() && current_text.is_empty() {
+                current_style = style;
+            } else if style != current_style {
+                spans.push(Span::styled(std::mem::take(&mut current_text), current_style));
+                current_style = style;
+            }
+
+            current_text.push(cell.ch);
+        }
+
+        spans.push(Span::styled(current_text, current_style));
+        lines.push(Line::from(spans));
+    }
+
+    Text::from(lines)
 }
 
 fn restore_tui_setup(entered_alt_screen: bool) -> Result<()> {
