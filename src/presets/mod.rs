@@ -4,7 +4,8 @@ use crate::{AsciiAnimError, Result};
 
 pub mod galaxy;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "type", content = "value")]
 pub enum OptionValue {
     Int(i64),
     Float(f64),
