@@ -258,7 +258,7 @@ fn tui_state_export_command_writes_current_config_snapshot() {
         None => env::remove_var("HOME"),
     }
 
-    assert_eq!(command, "ascii-animation run --config ~/.config/ascii-animation/tui-export.toml");
+    assert_eq!(command, "ascii-animation run --config ~/.config/ascii-animation/scene.toml");
     assert_eq!(exported_scene, state.scene);
 }
 

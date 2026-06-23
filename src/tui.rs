@@ -80,14 +80,14 @@ impl TuiState {
     }
 
     fn config_export_command(&self) -> String {
-        let export_path = Scene::tui_export_path();
+        let export_path = Scene::default_config_path();
         if self.last_exported_scene.borrow().as_ref() != Some(&self.scene) {
             if let Err(err) = self.scene.save_to_path(&export_path) {
                 return format!("failed to write {}: {}", export_path.display(), err);
             }
             *self.last_exported_scene.borrow_mut() = Some(self.scene.clone());
         }
-        "ascii-animation run --config ~/.config/ascii-animation/tui-export.toml".to_string()
+        "ascii-animation run --config ~/.config/ascii-animation/scene.toml".to_string()
     }
 
     pub fn preview_text(

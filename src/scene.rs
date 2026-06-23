@@ -81,12 +81,6 @@ impl Scene {
             .unwrap_or_else(|| PathBuf::from(".config/ascii-animation/scene.toml"))
     }
 
-    pub fn tui_export_path() -> PathBuf {
-        BaseDirs::new()
-            .map(|dirs| dirs.home_dir().join(".config/ascii-animation/tui-export.toml"))
-            .unwrap_or_else(|| PathBuf::from(".config/ascii-animation/tui-export.toml"))
-    }
-
     pub fn load_default_config_if_available() -> Result<Option<Self>> {
         let path = Self::default_config_path();
         let text = match std::fs::read_to_string(&path) {
