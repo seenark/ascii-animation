@@ -1,6 +1,5 @@
 use ascii_animation::presets::galaxy;
-use ascii_animation::render::buffer::FrameBuffer;
-use ascii_animation::render::{AnimationRenderer, RenderContext};
+use ascii_animation::render::{AnimationRenderer, FrameBuffer, RenderContext};
 use ascii_animation::scene::Layer;
 
 #[test]
