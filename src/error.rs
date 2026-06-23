@@ -33,6 +33,12 @@ pub enum AsciiAnimError {
         actual: String,
     },
 
+    #[error("cannot combine {input_source} with direct preset inputs: {conflicts}")]
+    ConflictingRunInputs {
+        input_source: &'static str,
+        conflicts: String,
+    },
+
     #[error("failed to parse scene config at {path}: {source}")]
     SceneConfigParse {
         path: PathBuf,

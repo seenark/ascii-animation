@@ -4,13 +4,16 @@ use std::path::Path;
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 use ascii_animation::tui::TuiState;
-use ratatui::style::Color;
 use ascii_animation::AsciiAnimError;
+use ratatui::style::Color;
 
 fn galaxy_instance(id: &str) -> AnimationInstance {
     let mut options = BTreeMap::new();
     options.insert("arms".to_string(), OptionValue::Int(3));
-    options.insert("palette".to_string(), OptionValue::Choice("cosmic".to_string()));
+    options.insert(
+        "palette".to_string(),
+        OptionValue::Choice("cosmic".to_string()),
+    );
 
     AnimationInstance {
         id: id.to_string(),
@@ -89,7 +92,10 @@ fn multi_instance_with_single_enabled_exports_config_command() {
 
 #[test]
 fn default_config_path_expands_home_directory() {
-    let home = directories::BaseDirs::new().unwrap().home_dir().to_path_buf();
+    let home = directories::BaseDirs::new()
+        .unwrap()
+        .home_dir()
+        .to_path_buf();
 
     assert_eq!(
         Scene::default_config_path(),
@@ -175,7 +181,9 @@ fn tui_state_starts_with_galaxy_and_exports_command() {
 
     assert_eq!(state.scene.instances.len(), 1);
     assert_eq!(state.scene.instances[0].preset, "galaxy");
-    assert!(state.export_command().starts_with("ascii-animation run galaxy"));
+    assert!(state
+        .export_command()
+        .starts_with("ascii-animation run galaxy"));
 }
 
 #[test]
@@ -237,6 +245,43 @@ fn tui_state_clamps_float_option_to_descriptor_bounds() {
 }
 
 #[test]
+fn tui_state_can_add_remove_and_select_instances() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+
+    state.add_instance("galaxy", &registry).unwrap();
+
+    assert_eq!(state.selected_instance().id, "galaxy-2");
+    assert_eq!(state.scene.instances.len(), 2);
+
+    state.cycle_selected_instance(-1, &registry).unwrap();
+    assert_eq!(state.selected_instance().id, "galaxy-1");
+
+    state.cycle_selected_instance(1, &registry).unwrap();
+    state.remove_selected_instance(&registry).unwrap();
+
+    assert_eq!(state.scene.instances.len(), 1);
+    assert_eq!(state.selected_instance().id, "galaxy-1");
+}
+
+#[test]
+fn tui_state_can_edit_selected_instance_structure() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.add_instance("galaxy", &registry).unwrap();
+    state.set_selected_placement(Placement::Right);
+    state.cycle_selected_layer(1);
+    state.adjust_selected_z_index(3);
+    state.cycle_selected_preset(&registry, 1).unwrap();
+
+    let instance = state.selected_instance();
+    assert_eq!(instance.placement, Placement::Right);
+    assert_eq!(instance.layer, Layer::Foreground);
+    assert_eq!(instance.z_index, 3);
+    assert_eq!(instance.preset, "galaxy");
+}
+
+#[test]
 fn tui_preview_uses_ratatui_styles_for_color_output() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
@@ -246,12 +291,12 @@ fn tui_preview_uses_ratatui_styles_for_color_output() {
         .iter()
         .flat_map(|line| line.spans.iter())
         .collect();
-    assert!(color_spans.iter().any(|span| !span.content.contains("\u{1b}")));
-    assert!(
-        color_spans
-            .iter()
-            .any(|span| matches!(span.style.fg, Some(Color::Rgb(_, _, _))))
-    );
+    assert!(color_spans
+        .iter()
+        .any(|span| !span.content.contains("\u{1b}")));
+    assert!(color_spans
+        .iter()
+        .any(|span| matches!(span.style.fg, Some(Color::Rgb(_, _, _)))));
 
     state.scene.color = false;
     let monochrome_preview = state.preview_text(&registry, 0.0, 40, 16);

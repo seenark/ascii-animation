@@ -1,6 +1,16 @@
 use std::collections::BTreeMap;
 
-use ascii_animation::presets::{galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor, PresetRegistry};
+use ascii_animation::presets::{
+    galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor, PresetRegistry,
+};
+
+fn demo_renderer(
+    _options: &BTreeMap<String, OptionValue>,
+    _seed: u64,
+) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
+    unreachable!("validation tests do not render")
+}
+
 
 fn descriptor() -> PresetDescriptor {
     PresetDescriptor::new(
@@ -19,6 +29,7 @@ fn descriptor() -> PresetDescriptor {
             ),
             OptionDescriptor::bool("enabled", "Enabled", true, false),
         ],
+        demo_renderer,
     )
 }
 
@@ -52,7 +63,10 @@ fn validation_rejects_out_of_range_integer() {
 
     let err = descriptor().validate_options(&raw).unwrap_err().to_string();
 
-    assert_eq!(err, "option `count` is out of range: expected 1..=10, got 11");
+    assert_eq!(
+        err,
+        "option `count` is out of range: expected 1..=10, got 11"
+    );
 }
 
 #[test]
@@ -62,13 +76,19 @@ fn validation_rejects_out_of_range_float() {
 
     let err = descriptor().validate_options(&raw).unwrap_err().to_string();
 
-    assert_eq!(err, "option `glow` is out of range: expected 0..=1, got 1.5");
+    assert_eq!(
+        err,
+        "option `glow` is out of range: expected 0..=1, got 1.5"
+    );
 }
 
 #[test]
 fn validation_rejects_invalid_choice() {
     let mut raw = BTreeMap::new();
-    raw.insert("palette".to_string(), OptionValue::Choice("bad".to_string()));
+    raw.insert(
+        "palette".to_string(),
+        OptionValue::Choice("bad".to_string()),
+    );
 
     let err = descriptor().validate_options(&raw).unwrap_err().to_string();
 
@@ -82,7 +102,10 @@ fn validation_rejects_invalid_choice() {
 fn descriptors_expose_option_kind_for_tui_and_cli() {
     let preset = descriptor();
 
-    assert_eq!(preset.options()[0].kind(), &OptionKind::Int { min: 1, max: 10 });
+    assert_eq!(
+        preset.options()[0].kind(),
+        &OptionKind::Int { min: 1, max: 10 }
+    );
     assert!(preset.options()[0].rebuilds_state());
 }
 

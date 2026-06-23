@@ -28,31 +28,19 @@ pub struct TuiState {
 
 impl TuiState {
     pub fn default_with_registry(registry: &PresetRegistry) -> Result<Self> {
-        let descriptor = registry.get("galaxy")?;
-        let (option_names, option_kinds): (Vec<_>, Vec<_>) = descriptor
-            .options()
-            .iter()
-            .map(|option| (option.name().to_string(), option.kind().clone()))
-            .unzip();
-        Ok(Self {
+        let mut state = Self {
             scene: Scene {
                 frame_rate: 30,
                 color: true,
-                instances: vec![AnimationInstance {
-                    id: "galaxy-1".to_string(),
-                    preset: "galaxy".to_string(),
-                    options: descriptor.defaults(),
-                    placement: Placement::Center,
-                    layer: Layer::Normal,
-                    z_index: 0,
-                    enabled: true,
-                }],
+                instances: Vec::new(),
             },
             selected_instance: 0,
             selected_option: 0,
-            option_names,
-            option_kinds,
-        })
+            option_names: Vec::new(),
+            option_kinds: Vec::new(),
+        };
+        state.add_instance("galaxy", registry)?;
+        Ok(state)
     }
 
     pub fn export_command(&self) -> String {
@@ -71,23 +59,142 @@ impl TuiState {
             .unwrap_or_else(|err| Text::from(err.to_string()))
     }
 
+    pub fn selected_instance(&self) -> &AnimationInstance {
+        &self.scene.instances[self.selected_instance]
+    }
+
+    pub fn add_instance(&mut self, preset: &str, registry: &PresetRegistry) -> Result<()> {
+        let descriptor = registry.get(preset)?;
+        let id = next_instance_id(&self.scene.instances, preset, None);
+        self.scene.instances.push(AnimationInstance {
+            id,
+            preset: preset.to_string(),
+            options: descriptor.defaults(),
+            placement: Placement::Center,
+            layer: Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        });
+        self.selected_instance = self.scene.instances.len() - 1;
+        self.sync_selected_options(registry)
+    }
+
+    pub fn remove_selected_instance(&mut self, registry: &PresetRegistry) -> Result<()> {
+        if self.scene.instances.len() <= 1 {
+            return Ok(());
+        }
+
+        self.scene.instances.remove(self.selected_instance);
+        self.selected_instance = self.selected_instance.min(self.scene.instances.len() - 1);
+        self.sync_selected_options(registry)
+    }
+
+    pub fn cycle_selected_instance(
+        &mut self,
+        delta: i32,
+        registry: &PresetRegistry,
+    ) -> Result<()> {
+        if self.scene.instances.is_empty() {
+            return Ok(());
+        }
+
+        let len = self.scene.instances.len() as i32;
+        self.selected_instance = (self.selected_instance as i32 + delta).rem_euclid(len) as usize;
+        self.sync_selected_options(registry)
+    }
+
+    pub fn cycle_selected_preset(
+        &mut self,
+        registry: &PresetRegistry,
+        delta: i32,
+    ) -> Result<()> {
+        let preset_names: Vec<_> = registry.names().collect();
+        if preset_names.is_empty() {
+            return Ok(());
+        }
+
+        let current_preset = self.selected_instance().preset.clone();
+        let current_index = preset_names
+            .iter()
+            .position(|name| *name == current_preset)
+            .unwrap_or(0) as i32;
+        let next_preset =
+            preset_names[(current_index + delta).rem_euclid(preset_names.len() as i32) as usize];
+        let next_id = next_instance_id(&self.scene.instances, next_preset, Some(self.selected_instance));
+        let descriptor = registry.get(next_preset)?;
+        let instance = self.selected_instance_mut();
+        instance.id = next_id;
+        instance.preset = next_preset.to_string();
+        instance.options = descriptor.defaults();
+        self.sync_selected_options(registry)
+    }
+
+    pub fn set_selected_placement(&mut self, placement: Placement) {
+        self.selected_instance_mut().placement = placement;
+    }
+
+    pub fn cycle_selected_placement(&mut self, delta: i32) {
+        let placements = [
+            Placement::Center,
+            Placement::Top,
+            Placement::Bottom,
+            Placement::Left,
+            Placement::Right,
+            Placement::Fill,
+        ];
+        let current = match &self.selected_instance().placement {
+            Placement::Center => 0,
+            Placement::Top => 1,
+            Placement::Bottom => 2,
+            Placement::Left => 3,
+            Placement::Right => 4,
+            Placement::Fill => 5,
+            Placement::Custom { .. } => 0,
+        };
+        let next = (current + delta).rem_euclid(placements.len() as i32) as usize;
+        self.selected_instance_mut().placement = placements[next].clone();
+    }
+
+    pub fn cycle_selected_layer(&mut self, delta: i32) {
+        let layers = [Layer::Background, Layer::Normal, Layer::Foreground];
+        let current = match self.selected_instance().layer {
+            Layer::Background => 0,
+            Layer::Normal => 1,
+            Layer::Foreground => 2,
+        };
+        let next = (current + delta).rem_euclid(layers.len() as i32) as usize;
+        self.selected_instance_mut().layer = layers[next];
+    }
+
+    pub fn adjust_selected_z_index(&mut self, delta: i32) {
+        self.selected_instance_mut().z_index += delta;
+    }
+
     pub fn select_option_by_name(&mut self, name: &str) -> Result<()> {
         self.selected_option = self
             .option_names
             .iter()
             .position(|option| option == name)
             .ok_or_else(|| AsciiAnimError::UnknownOption {
-                preset: self.scene.instances[self.selected_instance].preset.clone(),
+                preset: self.selected_instance().preset.clone(),
                 option: name.to_string(),
             })?;
         Ok(())
     }
 
     pub fn next_option(&mut self) {
+        if self.option_names.is_empty() {
+            return;
+        }
+
         self.selected_option = (self.selected_option + 1) % self.option_names.len();
     }
 
     pub fn previous_option(&mut self) {
+        if self.option_names.is_empty() {
+            return;
+        }
+
         self.selected_option = if self.selected_option == 0 {
             self.option_names.len() - 1
         } else {
@@ -96,9 +203,13 @@ impl TuiState {
     }
 
     pub fn adjust_selected_option(&mut self, delta: i32) -> Result<()> {
-        let instance = &mut self.scene.instances[self.selected_instance];
+        if self.option_names.is_empty() {
+            return Ok(());
+        }
+
         let option_name = self.option_names[self.selected_option].clone();
         let option_kind = self.option_kinds[self.selected_option].clone();
+        let instance = self.selected_instance_mut();
         let current = instance.options.get(&option_name).cloned().ok_or_else(|| {
             AsciiAnimError::UnknownOption {
                 preset: instance.preset.clone(),
@@ -119,6 +230,26 @@ impl TuiState {
             (_, value) => value,
         };
         instance.options.insert(option_name, next);
+        Ok(())
+    }
+
+    fn selected_instance_mut(&mut self) -> &mut AnimationInstance {
+        &mut self.scene.instances[self.selected_instance]
+    }
+
+    fn sync_selected_options(&mut self, registry: &PresetRegistry) -> Result<()> {
+        let preset = self.selected_instance().preset.clone();
+        let descriptor = registry.get(&preset)?;
+        let validated = descriptor.validate_options(&self.selected_instance().options)?;
+        let (option_names, option_kinds): (Vec<_>, Vec<_>) = descriptor
+            .options()
+            .iter()
+            .map(|option| (option.name().to_string(), option.kind().clone()))
+            .unzip();
+        self.selected_instance_mut().options = validated;
+        self.option_names = option_names;
+        self.option_kinds = option_kinds;
+        self.selected_option = self.selected_option.min(self.option_names.len().saturating_sub(1));
         Ok(())
     }
 }
@@ -176,17 +307,39 @@ fn run_loop(
                     chunks[0],
                 );
 
-                let instance = &state.scene.instances[state.selected_instance];
+                let instance = state.selected_instance();
                 let mut lines = vec![
-                    Line::from("Controls: ↑/↓ select, ←/→ adjust, s save, q quit"),
+                    Line::from("Controls: Tab/Shift-Tab instance, ↑/↓ option, ←/→ adjust"),
+                    Line::from("a add, d delete, p/P preset, m/M placement, l/L layer, [/ ] z"),
+                    Line::from("s save, q quit"),
                     Line::from(""),
+                    Line::from(format!(
+                        "Selected: {} ({}/{})",
+                        instance.id,
+                        state.selected_instance + 1,
+                        state.scene.instances.len()
+                    )),
+                    Line::from(format!(
+                        "Preset: {}  Placement: {}  Layer: {}  z-index: {}",
+                        instance.preset,
+                        placement_label(&instance.placement),
+                        layer_label(instance.layer),
+                        instance.z_index
+                    )),
+                    Line::from(""),
+                    Line::from("Instances:"),
                 ];
+                for (index, scene_instance) in state.scene.instances.iter().enumerate() {
+                    let marker = if index == state.selected_instance { ">" } else { " " };
+                    lines.push(Line::from(format!(
+                        "{} {} ({})",
+                        marker, scene_instance.id, scene_instance.preset
+                    )));
+                }
+                lines.push(Line::from(""));
+                lines.push(Line::from("Options:"));
                 for (index, name) in state.option_names.iter().enumerate() {
-                    let marker = if index == state.selected_option {
-                        ">"
-                    } else {
-                        " "
-                    };
+                    let marker = if index == state.selected_option { ">" } else { " " };
                     let value = instance
                         .options
                         .get(name)
@@ -199,7 +352,7 @@ fn run_loop(
                 frame.render_widget(
                     Paragraph::new(lines).block(
                         Block::default()
-                            .title("Options / Export")
+                            .title("Scene / Options / Export")
                             .borders(Borders::ALL),
                     ),
                     chunks[1],
@@ -212,16 +365,75 @@ fn run_loop(
                 Event::Key(key) if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc => {
                     return Ok(());
                 }
+                Event::Key(key) if key.code == KeyCode::Tab => {
+                    state.cycle_selected_instance(1, registry)?
+                }
+                Event::Key(key) if key.code == KeyCode::BackTab => {
+                    state.cycle_selected_instance(-1, registry)?
+                }
                 Event::Key(key) if key.code == KeyCode::Down => state.next_option(),
                 Event::Key(key) if key.code == KeyCode::Up => state.previous_option(),
                 Event::Key(key) if key.code == KeyCode::Right => state.adjust_selected_option(1)?,
                 Event::Key(key) if key.code == KeyCode::Left => state.adjust_selected_option(-1)?,
+                Event::Key(key) if key.code == KeyCode::Char('a') => {
+                    let preset = state.selected_instance().preset.clone();
+                    state.add_instance(&preset, registry)?;
+                }
+                Event::Key(key) if key.code == KeyCode::Char('d') => {
+                    state.remove_selected_instance(registry)?
+                }
+                Event::Key(key) if key.code == KeyCode::Char('p') => {
+                    state.cycle_selected_preset(registry, 1)?
+                }
+                Event::Key(key) if key.code == KeyCode::Char('P') => {
+                    state.cycle_selected_preset(registry, -1)?
+                }
+                Event::Key(key) if key.code == KeyCode::Char('m') => state.cycle_selected_placement(1),
+                Event::Key(key) if key.code == KeyCode::Char('M') => state.cycle_selected_placement(-1),
+                Event::Key(key) if key.code == KeyCode::Char('l') => state.cycle_selected_layer(1),
+                Event::Key(key) if key.code == KeyCode::Char('L') => state.cycle_selected_layer(-1),
+                Event::Key(key) if key.code == KeyCode::Char(']') => state.adjust_selected_z_index(1),
+                Event::Key(key) if key.code == KeyCode::Char('[') => state.adjust_selected_z_index(-1),
                 Event::Key(key) if key.code == KeyCode::Char('s') => {
                     state.scene.save_to_path(&Scene::default_config_path())?
                 }
                 _ => {}
             }
         }
+    }
+}
+
+fn next_instance_id(instances: &[AnimationInstance], preset: &str, skip: Option<usize>) -> String {
+    let mut suffix = 1;
+    loop {
+        let candidate = format!("{}-{}", preset, suffix);
+        let exists = instances.iter().enumerate().any(|(index, instance)| {
+            skip != Some(index) && instance.id == candidate
+        });
+        if !exists {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn placement_label(placement: &Placement) -> &'static str {
+    match placement {
+        Placement::Center => "center",
+        Placement::Top => "top",
+        Placement::Bottom => "bottom",
+        Placement::Left => "left",
+        Placement::Right => "right",
+        Placement::Fill => "fill",
+        Placement::Custom { .. } => "custom",
+    }
+}
+
+fn layer_label(layer: Layer) -> &'static str {
+    match layer {
+        Layer::Background => "background",
+        Layer::Normal => "normal",
+        Layer::Foreground => "foreground",
     }
 }
 
@@ -234,11 +446,6 @@ fn rotate_choice(choices: &[String], current: &str, delta: i32) -> OptionValue {
     OptionValue::Choice(choices[next_index].clone())
 }
 
-fn restore_tui_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-    let restore_err = execute!(terminal.backend_mut(), Show, LeaveAlternateScreen).err();
-    let disable_err = terminal::disable_raw_mode().err();
-    finish_tui_restore(restore_err, disable_err)
-}
 fn frame_to_text(frame: &FrameBuffer, color: bool) -> Text<'static> {
     let mut lines = Vec::with_capacity(frame.height() as usize);
     for y in 0..frame.height() {
@@ -259,10 +466,7 @@ fn frame_to_text(frame: &FrameBuffer, color: bool) -> Text<'static> {
             if spans.is_empty() && current_text.is_empty() {
                 current_style = style;
             } else if style != current_style {
-                spans.push(Span::styled(
-                    std::mem::take(&mut current_text),
-                    current_style,
-                ));
+                spans.push(Span::styled(std::mem::take(&mut current_text), current_style));
                 current_style = style;
             }
 
@@ -274,6 +478,12 @@ fn frame_to_text(frame: &FrameBuffer, color: bool) -> Text<'static> {
     }
 
     Text::from(lines)
+}
+
+fn restore_tui_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+    let restore_err = execute!(terminal.backend_mut(), Show, LeaveAlternateScreen).err();
+    let disable_err = terminal::disable_raw_mode().err();
+    finish_tui_restore(restore_err, disable_err)
 }
 
 fn restore_tui_setup(entered_alt_screen: bool) -> Result<()> {

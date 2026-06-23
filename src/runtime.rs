@@ -6,11 +6,11 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
-use crate::presets::{galaxy, OptionValue, PresetDescriptor, PresetRegistry};
+use crate::presets::{OptionValue, PresetDescriptor, PresetRegistry};
 use crate::render::ansi::render_to_ansi;
 use crate::render::buffer::FrameBuffer;
 use crate::render::layout::resolve_placement;
-use crate::render::{AnimationRenderer, RenderContext};
+use crate::render::RenderContext;
 use crate::scene::{AnimationInstance, Placement, Scene};
 use crate::{AsciiAnimError, Result};
 
@@ -79,22 +79,20 @@ pub fn render_scene_frame(
             desired_width,
             desired_height,
         );
-        if instance.preset == "galaxy" {
-            let mut renderer = galaxy::renderer(&instance.options, seed + order as u64)?;
-            renderer.render(
-                &mut frame,
-                RenderContext {
-                    elapsed_seconds,
-                    layer: instance.layer,
-                    z_index: instance.z_index,
-                    order,
-                    x_offset: rect.x,
-                    y_offset: rect.y,
-                    width: rect.width,
-                    height: rect.height,
-                },
-            );
-        }
+        let mut renderer = descriptor.create_renderer(&instance.options, seed + order as u64)?;
+        renderer.render(
+            &mut frame,
+            RenderContext {
+                elapsed_seconds,
+                layer: instance.layer,
+                z_index: instance.z_index,
+                order,
+                x_offset: rect.x,
+                y_offset: rect.y,
+                width: rect.width,
+                height: rect.height,
+            },
+        );
     }
     Ok(frame)
 }

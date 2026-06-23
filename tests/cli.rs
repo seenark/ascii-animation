@@ -158,6 +158,119 @@ fn rejects_invalid_galaxy_option_range() {
 }
 
 #[test]
+fn rejects_direct_preset_flags_with_config_scene() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scene.toml");
+    galaxy_scene(true).save_to_path(&path).unwrap();
+
+    let cli = Cli::parse_from([
+        "ascii-animation",
+        "run",
+        "--config",
+        path.to_str().unwrap(),
+        "--arms",
+        "4",
+    ]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
+
+    let err = scene_from_run_args(&args, &build_default_registry())
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        err,
+        "cannot combine --config with direct preset inputs: --arms"
+    );
+}
+
+#[test]
+fn rejects_direct_preset_name_with_default_scene() {
+    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--scene", "default"]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
+
+    let err = scene_from_run_args(&args, &build_default_registry())
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        err,
+        "cannot combine --scene with direct preset inputs: preset"
+    );
+}
+
+#[derive(Debug)]
+struct FillRenderer {
+    ch: char,
+}
+
+impl ascii_animation::render::AnimationRenderer for FillRenderer {
+    fn render(
+        &mut self,
+        frame: &mut ascii_animation::render::FrameBuffer,
+        context: ascii_animation::render::RenderContext,
+    ) {
+        for y in 0..context.height {
+            for x in 0..context.width {
+                frame.put_cell(
+                    context.x_offset + x,
+                    context.y_offset + y,
+                    ascii_animation::render::Cell::visible(
+                        self.ch,
+                        None,
+                        context.layer,
+                        context.z_index,
+                        context.order,
+                    ),
+                );
+            }
+        }
+    }
+}
+
+fn demo_renderer(
+    _options: &BTreeMap<String, OptionValue>,
+    _seed: u64,
+) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
+    Ok(Box::new(FillRenderer { ch: '#' }))
+}
+
+#[test]
+fn render_scene_frame_dispatches_registered_presets() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![],
+            demo_renderer,
+        ),
+    ]);
+    let scene = Scene {
+        frame_rate: 24,
+        color: false,
+        instances: vec![AnimationInstance {
+            id: "demo-1".to_string(),
+            preset: "demo".to_string(),
+            options: BTreeMap::new(),
+            placement: Placement::Fill,
+            layer: Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        }],
+    };
+
+    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 6, 3).unwrap();
+
+    assert_eq!(frame.get(0, 0).unwrap().ch, '#');
+    assert_eq!(frame.get(5, 2).unwrap().ch, '#');
+}
+
+
+#[test]
 fn direct_scene_renders_non_empty_frame() {
     let cli = Cli::parse_from([
         "ascii-animation",

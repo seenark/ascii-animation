@@ -90,8 +90,46 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+
+fn reject_conflicting_direct_inputs(args: &RunArgs, source: &'static str) -> Result<()> {
+    let direct_inputs = direct_preset_inputs(args);
+    if direct_inputs.is_empty() {
+        return Ok(());
+    }
+
+    Err(AsciiAnimError::ConflictingRunInputs {
+        input_source: source,
+        conflicts: direct_inputs.join(", "),
+    })
+}
+
+fn direct_preset_inputs(args: &RunArgs) -> Vec<&'static str> {
+    let mut inputs = Vec::new();
+    if args.preset.is_some() {
+        inputs.push("preset");
+    }
+    push_flag(&mut inputs, "--arms", args.arms.is_some());
+    push_flag(&mut inputs, "--stars", args.stars.is_some());
+    push_flag(&mut inputs, "--speed", args.speed.is_some());
+    push_flag(&mut inputs, "--size", args.size.is_some());
+    push_flag(&mut inputs, "--twist", args.twist.is_some());
+    push_flag(&mut inputs, "--noise", args.noise.is_some());
+    push_flag(&mut inputs, "--glow", args.glow.is_some());
+    push_flag(&mut inputs, "--twinkle", args.twinkle.is_some());
+    push_flag(&mut inputs, "--palette", args.palette.is_some());
+    push_flag(&mut inputs, "--gradient", args.gradient.is_some());
+    inputs
+}
+
+fn push_flag(inputs: &mut Vec<&'static str>, flag: &'static str, enabled: bool) {
+    if enabled {
+        inputs.push(flag);
+    }
+}
+
 pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<Scene> {
     if let Some(path) = &args.config {
+        reject_conflicting_direct_inputs(args, "--config")?;
         let mut scene = Scene::load_from_path(path)?;
         if args.no_color {
             scene.color = false;
@@ -100,6 +138,7 @@ pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<
     }
 
     if let Some(scene_name) = args.scene.as_deref() {
+        reject_conflicting_direct_inputs(args, "--scene")?;
         if scene_name == "default" {
             let mut scene = Scene::load_from_path(&Scene::default_config_path())?;
             if args.no_color {

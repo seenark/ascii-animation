@@ -68,7 +68,15 @@ pub fn descriptor() -> PresetDescriptor {
                 false,
             ),
         ],
+        boxed_renderer,
     )
+}
+
+pub fn boxed_renderer(
+    options: &BTreeMap<String, OptionValue>,
+    seed: u64,
+) -> Result<Box<dyn AnimationRenderer>> {
+    Ok(Box::new(renderer(options, seed)?))
 }
 
 pub fn renderer(options: &BTreeMap<String, OptionValue>, seed: u64) -> Result<GalaxyRenderer> {
@@ -105,7 +113,8 @@ impl AnimationRenderer for GalaxyRenderer {
             }
 
             let glow_boost = self.options.glow * 0.4;
-            let char_idx = ((brightness + glow_boost) * (gradient.len() as f64 - 0.01)).floor() as usize;
+            let char_idx =
+                ((brightness + glow_boost) * (gradient.len() as f64 - 0.01)).floor() as usize;
             let ch = gradient[char_idx.min(gradient.len() - 1)];
             let color = if self.options.palette == "rainbow" {
                 palette[star.arm as usize % palette.len()]
@@ -117,7 +126,13 @@ impl AnimationRenderer for GalaxyRenderer {
             frame.put_cell(
                 context.x_offset + px as u16,
                 context.y_offset + py as u16,
-                Cell::visible(ch, Some(color), context.layer, context.z_index, context.order),
+                Cell::visible(
+                    ch,
+                    Some(color),
+                    context.layer,
+                    context.z_index,
+                    context.order,
+                ),
             );
         }
     }
@@ -139,7 +154,11 @@ impl GalaxyOptions {
                 "palette",
                 &["cosmic", "stardust", "nebula", "rainbow", "ice", "mono"],
             )?,
-            gradient: get_choice(values, "gradient", &["smooth", "classic", "starry", "block"])?,
+            gradient: get_choice(
+                values,
+                "gradient",
+                &["smooth", "classic", "starry", "block"],
+            )?,
         })
     }
 }
@@ -201,7 +220,11 @@ fn get_float(values: &BTreeMap<String, OptionValue>, key: &str) -> Result<f64> {
     }
 }
 
-fn get_choice(values: &BTreeMap<String, OptionValue>, key: &str, choices: &[&str]) -> Result<String> {
+fn get_choice(
+    values: &BTreeMap<String, OptionValue>,
+    key: &str,
+    choices: &[&str],
+) -> Result<String> {
     match values.get(key) {
         Some(OptionValue::Choice(value)) if choices.contains(&value.as_str()) => Ok(value.clone()),
         Some(OptionValue::Choice(value)) => Err(AsciiAnimError::InvalidChoice {
