@@ -1,38 +1,19 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::builder::PossibleValuesParser;
+use clap::{value_parser, Arg, ArgAction, ArgMatches, Command as ClapCommand};
 
 use crate::error::AsciiAnimError;
-use crate::presets::{build_default_registry, OptionKind, OptionValue, PresetDescriptor, PresetRegistry};
+use crate::presets::{
+    build_default_registry, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor,
+    PresetRegistry,
+};
 use crate::runtime;
 use crate::scene::{AnimationInstance, Layer, Placement, Scene};
 use crate::tui;
 use crate::Result;
-
-#[derive(Debug, Parser)]
-#[command(
-    name = "ascii-animation",
-    version,
-    about = "Run preset ASCII animations in the terminal"
-)]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum Command {
-    Run(Box<RawRunArgs>),
-    Tui(TuiArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct RawRunArgs {
-    #[arg(num_args = 0.., allow_hyphen_values = true)]
-    pub raw: Vec<OsString>,
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct RunArgs {
@@ -45,19 +26,134 @@ pub struct RunArgs {
     direct_inputs: Vec<String>,
 }
 
-#[derive(Debug, Args)]
-pub struct TuiArgs {}
+#[derive(Debug)]
+enum ParsedCommand {
+    Run(RunArgs),
+    Tui,
+}
+
+pub fn run_command_for(registry: &PresetRegistry) -> ClapCommand {
+    let mut command = ClapCommand::new("run")
+        .about("Run a preset directly or load a saved scene")
+        .arg(Arg::new("preset").value_name("PRESET"))
+        .arg(Arg::new("scene").long("scene").value_name("scene"))
+        .arg(
+            Arg::new("config")
+                .long("config")
+                .value_name("config")
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .arg(
+            Arg::new("no-color")
+                .long("no-color")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("seed")
+                .long("seed")
+                .value_name("seed")
+                .value_parser(value_parser!(u64)),
+        );
+    let mut seen = BTreeSet::new();
+    for descriptor in registry.descriptors() {
+        for option in descriptor.options() {
+            if seen.insert(option.name().to_string()) {
+                command = command.arg(descriptor_arg(option));
+            }
+        }
+    }
+    command
+}
+
+fn cli_command_for(registry: &PresetRegistry) -> ClapCommand {
+    ClapCommand::new("ascii-animation")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about("Run preset ASCII animations in the terminal")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(run_command_for(registry))
+        .subcommand(ClapCommand::new("tui").about("Open the interactive scene editor"))
+}
+
+fn descriptor_arg(option: &OptionDescriptor) -> Arg {
+    let name = leaked(option.name());
+    let arg = Arg::new(name).long(name).value_name(name);
+    match option.kind() {
+        OptionKind::Int { .. } => arg.value_parser(value_parser!(i64)),
+        OptionKind::Float { .. } => arg.value_parser(value_parser!(f64)),
+        OptionKind::Bool => arg.value_parser(value_parser!(bool)),
+        OptionKind::Choice { choices } => arg.value_parser(PossibleValuesParser::new(
+            choices
+                .iter()
+                .map(|choice| leaked(choice))
+                .collect::<Vec<_>>(),
+        )),
+    }
+}
+
+fn leaked(value: &str) -> &'static str {
+    Box::leak(value.to_string().into_boxed_str())
+}
+
+fn parse_command_from<I, T>(args: I, registry: &PresetRegistry) -> anyhow::Result<ParsedCommand>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let matches = cli_command_for(registry).try_get_matches_from(args)?;
+    match matches.subcommand() {
+        Some(("run", run_matches)) => Ok(ParsedCommand::Run(parse_run_matches(run_matches, registry))),
+        Some(("tui", _)) => Ok(ParsedCommand::Tui),
+        _ => anyhow::bail!("expected subcommand"),
+    }
+}
+
+fn parse_run_matches(matches: &ArgMatches, registry: &PresetRegistry) -> RunArgs {
+    let mut parsed = RunArgs {
+        preset: matches.get_one::<String>("preset").cloned(),
+        scene: matches.get_one::<String>("scene").cloned(),
+        config: matches.get_one::<PathBuf>("config").cloned(),
+        no_color: matches.get_flag("no-color"),
+        seed: matches.get_one::<u64>("seed").copied(),
+        ..RunArgs::default()
+    };
+    if parsed.preset.is_some() {
+        parsed.direct_inputs.push("preset".to_string());
+    }
+
+    let mut seen = BTreeSet::new();
+    for descriptor in registry.descriptors() {
+        for option in descriptor.options() {
+            if !seen.insert(option.name().to_string()) {
+                continue;
+            }
+            if let Some(value) = descriptor_value_from_matches(matches, option) {
+                parsed.direct_inputs.push(format!("--{}", option.name()));
+                parsed.direct_options.insert(option.name().to_string(), value);
+            }
+        }
+    }
+
+    parsed
+}
+
+fn descriptor_value_from_matches(matches: &ArgMatches, option: &OptionDescriptor) -> Option<String> {
+    match option.kind() {
+        OptionKind::Int { .. } => matches.get_one::<i64>(option.name()).map(ToString::to_string),
+        OptionKind::Float { .. } => matches.get_one::<f64>(option.name()).map(ToString::to_string),
+        OptionKind::Bool => matches.get_one::<bool>(option.name()).map(ToString::to_string),
+        OptionKind::Choice { .. } => matches.get_one::<String>(option.name()).cloned(),
+    }
+}
 
 pub fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
     let registry = build_default_registry();
-    match cli.command {
-        Command::Run(args) => {
-            let args = parse_run_args(*args, &registry)?;
+    match parse_command_from(std::env::args_os(), &registry)? {
+        ParsedCommand::Run(args) => {
             let scene = scene_from_run_args(&args, &registry)?;
             runtime::run_scene(scene, &registry, resolved_seed(args.seed))?;
         }
-        Command::Tui(_) => tui::run(&registry)?,
+        ParsedCommand::Tui => tui::run(&registry)?,
     }
     Ok(())
 }
@@ -67,60 +163,10 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = Cli::try_parse_from(args)?;
-    match cli.command {
-        Command::Run(args) => Ok(parse_run_args(*args, registry)?),
-        Command::Tui(_) => anyhow::bail!("expected run command"),
+    match parse_command_from(args, registry)? {
+        ParsedCommand::Run(args) => Ok(args),
+        ParsedCommand::Tui => anyhow::bail!("expected run command"),
     }
-}
-
-pub fn parse_run_args(args: RawRunArgs, _registry: &PresetRegistry) -> Result<RunArgs> {
-    let mut parsed = RunArgs::default();
-    let raw: Vec<String> = args
-        .raw
-        .into_iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect();
-    let mut index = 0;
-
-    while index < raw.len() {
-        match raw[index].as_str() {
-            "--scene" => {
-                parsed.scene = Some(next_value(&raw, &mut index, "scene")?);
-            }
-            "--config" => {
-                parsed.config = Some(PathBuf::from(next_value(&raw, &mut index, "config")?));
-            }
-            "--no-color" => {
-                parsed.no_color = true;
-                index += 1;
-            }
-            "--seed" => {
-                let value = next_value(&raw, &mut index, "seed")?;
-                parsed.seed = Some(parse_seed(&value)?);
-            }
-            token if token.starts_with("--") => {
-                let name = token.trim_start_matches("--").to_string();
-                let value = next_value(&raw, &mut index, &name)?;
-                parsed.direct_inputs.push(token.to_string());
-                parsed.direct_options.insert(name, value);
-            }
-            token => {
-                if parsed.preset.is_some() {
-                    return Err(AsciiAnimError::InvalidOptionType {
-                        option: "preset".to_string(),
-                        expected: "single preset name",
-                        actual: token.to_string(),
-                    });
-                }
-                parsed.preset = Some(token.to_string());
-                parsed.direct_inputs.push("preset".to_string());
-                index += 1;
-            }
-        }
-    }
-
-    Ok(parsed)
 }
 
 fn resolved_seed(seed: Option<u64>) -> u64 {
@@ -132,27 +178,6 @@ where
     F: FnOnce() -> u64,
 {
     seed.unwrap_or_else(generate)
-}
-
-fn next_value(raw: &[String], index: &mut usize, option: &str) -> Result<String> {
-    let value_index = *index + 1;
-    let Some(value) = raw.get(value_index) else {
-        return Err(AsciiAnimError::InvalidOptionType {
-            option: option.to_string(),
-            expected: "value",
-            actual: "<missing>".to_string(),
-        });
-    };
-    *index += 2;
-    Ok(value.clone())
-}
-
-fn parse_seed(raw: &str) -> Result<u64> {
-    raw.parse::<u64>().map_err(|_| AsciiAnimError::InvalidOptionType {
-        option: "seed".to_string(),
-        expected: "integer",
-        actual: raw.to_string(),
-    })
 }
 
 fn reject_conflicting_direct_inputs(args: &RunArgs, source: &'static str) -> Result<()> {

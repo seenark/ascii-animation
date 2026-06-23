@@ -312,6 +312,10 @@ impl PresetRegistry {
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.presets.keys().map(String::as_str)
     }
+
+    pub fn descriptors(&self) -> impl Iterator<Item = &PresetDescriptor> {
+        self.presets.values()
+    }
 }
 
 impl Default for PresetRegistry {

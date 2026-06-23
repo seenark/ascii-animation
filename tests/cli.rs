@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::sync::Mutex;
 
-use ascii_animation::cli::{parse_run_args_from, scene_from_run_args};
+use ascii_animation::cli::{parse_run_args_from, run_command_for, scene_from_run_args};
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::render::ansi::render_to_ansi;
 use ascii_animation::runtime::{prepare_scene_terminal, render_scene_frame, TerminalDriver};
@@ -265,6 +265,73 @@ fn parses_registered_preset_flags_from_descriptor_metadata() {
         scene.instances[0].options.get("palette"),
         Some(&OptionValue::Choice("cosmic".to_string()))
     );
+}
+
+#[test]
+fn clap_help_lists_descriptor_defined_run_flags() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![
+                ascii_animation::presets::OptionDescriptor::int_step(
+                    "count",
+                    "Count",
+                    3,
+                    1,
+                    9,
+                    3,
+                    false,
+                ),
+                ascii_animation::presets::OptionDescriptor::choice(
+                    "palette",
+                    "Palette",
+                    "mono",
+                    vec!["mono", "cosmic"],
+                    false,
+                ),
+            ],
+            demo_renderer,
+        ),
+    ]);
+    let mut command = run_command_for(&registry);
+    let mut help = Vec::new();
+    command.write_long_help(&mut help).unwrap();
+    let help = String::from_utf8(help).unwrap();
+
+    assert!(help.contains("run"));
+    assert!(help.contains("--count <count>"));
+    assert!(help.contains("--palette <palette>"));
+}
+
+#[test]
+fn clap_rejects_unknown_run_flags_after_descriptor_registration() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![ascii_animation::presets::OptionDescriptor::int_step(
+                "count",
+                "Count",
+                3,
+                1,
+                9,
+                3,
+                false,
+            )],
+            demo_renderer,
+        ),
+    ]);
+    let err = parse_run_args_from(
+        ["ascii-animation", "run", "demo", "--sparkles", "7"],
+        &registry,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("unexpected argument '--sparkles' found"));
 }
 
 #[derive(Debug)]
