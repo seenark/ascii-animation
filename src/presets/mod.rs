@@ -218,6 +218,12 @@ impl PresetRegistry {
     }
 }
 
+impl Default for PresetRegistry {
+    fn default() -> Self {
+        Self::new(vec![galaxy::descriptor()])
+    }
+}
+
 fn trim_float(value: f64) -> String {
     let mut text = value.to_string();
     if text.contains('.') {

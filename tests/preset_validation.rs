@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use ascii_animation::presets::{OptionDescriptor, OptionKind, OptionValue, PresetDescriptor};
+use ascii_animation::presets::{galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor, PresetRegistry};
 
 fn descriptor() -> PresetDescriptor {
     PresetDescriptor::new(
@@ -84,4 +84,13 @@ fn descriptors_expose_option_kind_for_tui_and_cli() {
 
     assert_eq!(preset.options()[0].kind(), &OptionKind::Int { min: 1, max: 10 });
     assert!(preset.options()[0].rebuilds_state());
+}
+
+#[test]
+fn default_registry_includes_galaxy_descriptor() {
+    let registry = PresetRegistry::default();
+    let descriptor = registry.get("galaxy").unwrap();
+
+    assert_eq!(descriptor.name(), "galaxy");
+    assert_eq!(descriptor.defaults(), galaxy::descriptor().defaults());
 }
