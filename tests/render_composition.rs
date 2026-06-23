@@ -1,3 +1,4 @@
+use ascii_animation::render::ansi::render_to_ansi;
 use ascii_animation::render::buffer::{Cell, FrameBuffer, Rgb};
 use ascii_animation::scene::Layer;
 
@@ -63,4 +64,20 @@ fn plain_text_preserves_frame_dimensions() {
     frame.put_cell(2, 1, cell('y', Layer::Normal, 0, 0));
 
     assert_eq!(frame.to_plain_text(), " x \n  y");
+}
+
+#[test]
+fn ansi_renderer_emits_truecolor_when_enabled() {
+    let mut frame = FrameBuffer::new(1, 1);
+    frame.put_cell(0, 0, cell('@', Layer::Normal, 0, 0));
+
+    assert_eq!(render_to_ansi(&frame, true), "\u{1b}[38;2;1;2;3m@\u{1b}[0m");
+}
+
+#[test]
+fn ansi_renderer_omits_escape_codes_when_color_disabled() {
+    let mut frame = FrameBuffer::new(1, 1);
+    frame.put_cell(0, 0, cell('@', Layer::Normal, 0, 0));
+
+    assert_eq!(render_to_ansi(&frame, false), "@");
 }
