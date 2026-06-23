@@ -188,12 +188,10 @@ fn tui_state_loads_saved_default_scene_on_startup() {
 }
 
 #[test]
-fn tui_state_falls_back_to_default_scene_when_default_config_is_unreadable() {
+fn tui_state_falls_back_to_default_scene_when_default_config_is_missing() {
     let _home_lock = HOME_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
-    let path = home.join(".config/ascii-animation/scene.toml");
-    std::fs::create_dir_all(&path).unwrap();
 
     let original_home = env::var_os("HOME");
     env::set_var("HOME", home);
@@ -211,6 +209,31 @@ fn tui_state_falls_back_to_default_scene_when_default_config_is_unreadable() {
     assert_eq!(state.scene.instances.len(), 1);
     assert_eq!(state.scene.instances[0].preset, "galaxy");
     assert_eq!(state.scene.instances[0].placement, Placement::Center);
+}
+
+#[test]
+fn tui_state_surfaces_default_scene_io_errors() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    std::fs::create_dir_all(&path).unwrap();
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let registry = build_default_registry();
+    let err = match TuiState::load_startup(&registry) {
+        Ok(_) => panic!("expected startup load to fail for non-missing default scene I/O error"),
+        Err(err) => err,
+    };
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert!(matches!(err, AsciiAnimError::Terminal(message) if message.contains("Is a directory")));
 }
 
 #[test]
@@ -511,7 +534,7 @@ fn tui_state_can_edit_selected_instance_structure() {
     assert_eq!(instance.preset, "galaxy");
 }
 #[test]
-fn tui_state_cycles_through_custom_placement_without_collapsing_it() {
+fn tui_state_restores_edited_custom_placement_after_cycling_back() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
 
@@ -537,6 +560,17 @@ fn tui_state_cycles_through_custom_placement_without_collapsing_it() {
         .unwrap();
     state.cycle_selected_placement(1, &registry).unwrap();
     assert_eq!(state.selected_instance().placement, Placement::Center);
+
+    state.cycle_selected_placement(-1, &registry).unwrap();
+    assert_eq!(
+        state.selected_instance().placement,
+        Placement::Custom {
+            x: 2,
+            y: 3,
+            width: 20,
+            height: 10,
+        }
+    );
 }
 
 #[test]

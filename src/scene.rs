@@ -85,7 +85,8 @@ impl Scene {
         let path = Self::default_config_path();
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
-            Err(_) => return Ok(None),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => return Err(AsciiAnimError::Terminal(source.to_string())),
         };
         let scene: Self = toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
             path: path.clone(),

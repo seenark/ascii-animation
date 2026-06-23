@@ -25,6 +25,7 @@ pub struct TuiState {
     selected_option: usize,
     option_names: Vec<String>,
     option_kinds: Vec<OptionKind>,
+    custom_placements: Vec<Placement>,
     last_exported_scene: RefCell<Option<Scene>>,
 }
 
@@ -45,6 +46,7 @@ impl TuiState {
             selected_option: 0,
             option_names: Vec::new(),
             option_kinds: Vec::new(),
+            custom_placements: Vec::new(),
             last_exported_scene: RefCell::new(None),
         };
         state.add_instance("galaxy", registry)?;
@@ -61,6 +63,24 @@ impl TuiState {
     fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
         let mut state = Self {
             last_exported_scene: RefCell::new(Some(scene.clone())),
+            custom_placements: scene
+                .instances
+                .iter()
+                .map(|instance| match &instance.placement {
+                    Placement::Custom {
+                        x,
+                        y,
+                        width,
+                        height,
+                    } => Placement::Custom {
+                        x: *x,
+                        y: *y,
+                        width: *width,
+                        height: *height,
+                    },
+                    _ => default_custom_placement(),
+                })
+                .collect(),
             scene,
             selected_instance: 0,
             selected_option: 0,
@@ -128,6 +148,7 @@ impl TuiState {
             z_index: 0,
             enabled: true,
         });
+        self.custom_placements.push(default_custom_placement());
         self.selected_instance = self.scene.instances.len() - 1;
         self.sync_selected_options(registry)
     }
@@ -138,6 +159,7 @@ impl TuiState {
         }
 
         self.scene.instances.remove(self.selected_instance);
+        self.custom_placements.remove(self.selected_instance);
         self.selected_instance = self.selected_instance.min(self.scene.instances.len() - 1);
         self.sync_selected_options(registry)
     }
@@ -187,6 +209,9 @@ impl TuiState {
         placement: Placement,
         registry: &PresetRegistry,
     ) -> Result<()> {
+        if let Placement::Custom { .. } = &placement {
+            self.custom_placements[self.selected_instance] = placement.clone();
+        }
         self.selected_instance_mut().placement = placement;
         self.sync_selected_options(registry)
     }
@@ -196,29 +221,6 @@ impl TuiState {
         delta: i32,
         registry: &PresetRegistry,
     ) -> Result<()> {
-        let custom = match &self.selected_instance().placement {
-            Placement::Custom {
-                x,
-                y,
-                width,
-                height,
-            } => Placement::Custom {
-                x: *x,
-                y: *y,
-                width: *width,
-                height: *height,
-            },
-            _ => default_custom_placement(),
-        };
-        let placements = [
-            Placement::Center,
-            Placement::Top,
-            Placement::Bottom,
-            Placement::Left,
-            Placement::Right,
-            Placement::Fill,
-            custom,
-        ];
         let current = match &self.selected_instance().placement {
             Placement::Center => 0,
             Placement::Top => 1,
@@ -228,6 +230,18 @@ impl TuiState {
             Placement::Fill => 5,
             Placement::Custom { .. } => 6,
         };
+        if let Placement::Custom { .. } = &self.selected_instance().placement {
+            self.custom_placements[self.selected_instance] = self.selected_instance().placement.clone();
+        }
+        let placements = [
+            Placement::Center,
+            Placement::Top,
+            Placement::Bottom,
+            Placement::Left,
+            Placement::Right,
+            Placement::Fill,
+            self.custom_placements[self.selected_instance].clone(),
+        ];
         let next = (current + delta).rem_euclid(placements.len() as i32) as usize;
         self.selected_instance_mut().placement = placements[next].clone();
         self.sync_selected_options(registry)
@@ -290,6 +304,8 @@ impl TuiState {
         {
             let instance = self.selected_instance_mut();
             if adjust_custom_placement(&mut instance.placement, &option_name, delta) {
+                let placement = instance.placement.clone();
+                self.custom_placements[self.selected_instance] = placement;
                 return Ok(());
             }
         }
