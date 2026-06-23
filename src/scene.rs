@@ -107,7 +107,10 @@ impl Scene {
     }
 
     pub fn export_command(&self) -> String {
-        if self.instances.len() == 1 && self.instances[0].supports_direct_run_export() {
+        if self.frame_rate == 30
+            && self.instances.len() == 1
+            && self.instances[0].supports_direct_run_export()
+        {
             let instance = &self.instances[0];
             let mut command = format!("ascii-animation run {}", instance.preset);
             for (name, value) in &instance.options {

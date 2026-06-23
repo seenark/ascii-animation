@@ -103,6 +103,18 @@ fn reject_conflicting_direct_inputs(args: &RunArgs, source: &'static str) -> Res
     })
 }
 
+fn reject_conflicting_scene_inputs(args: &RunArgs) -> Result<()> {
+    if args.config.is_some() && args.scene.is_some() {
+        return Err(AsciiAnimError::ConflictingSceneInputs {
+            left: "--config",
+            right: "--scene",
+        });
+    }
+
+    Ok(())
+}
+
+
 fn direct_preset_inputs(args: &RunArgs) -> Vec<&'static str> {
     let mut inputs = Vec::new();
     if args.preset.is_some() {
@@ -128,6 +140,7 @@ fn push_flag(inputs: &mut Vec<&'static str>, flag: &'static str, enabled: bool) 
 }
 
 pub fn scene_from_run_args(args: &RunArgs, registry: &PresetRegistry) -> Result<Scene> {
+    reject_conflicting_scene_inputs(args)?;
     if let Some(path) = &args.config {
         reject_conflicting_direct_inputs(args, "--config")?;
         let mut scene = Scene::load_from_path(path)?;

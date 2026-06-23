@@ -38,6 +38,12 @@ pub enum AsciiAnimError {
         input_source: &'static str,
         conflicts: String,
     },
+
+    #[error("cannot combine {left} with {right}")]
+    ConflictingSceneInputs {
+        left: &'static str,
+        right: &'static str,
+    },
     #[error("scene must contain at least one animation instance")]
     EmptyScene,
 

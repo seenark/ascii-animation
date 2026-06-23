@@ -202,6 +202,31 @@ fn rejects_direct_preset_name_with_default_scene() {
     );
 }
 
+#[test]
+fn rejects_combining_config_and_scene_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scene.toml");
+    galaxy_scene(true).save_to_path(&path).unwrap();
+
+    let cli = Cli::parse_from([
+        "ascii-animation",
+        "run",
+        "--config",
+        path.to_str().unwrap(),
+        "--scene",
+        "default",
+    ]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
+
+    let err = scene_from_run_args(&args, &build_default_registry())
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(err, "cannot combine --config with --scene");
+}
+
 #[derive(Debug)]
 struct FillRenderer {
     ch: char,

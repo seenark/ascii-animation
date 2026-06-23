@@ -59,6 +59,20 @@ fn single_instance_exports_full_command() {
         "ascii-animation run galaxy --arms 3 --palette cosmic"
     );
 }
+
+#[test]
+fn single_instance_with_non_default_frame_rate_exports_config_command() {
+    let scene = Scene {
+        frame_rate: 24,
+        color: true,
+        instances: vec![galaxy_instance("galaxy-1")],
+    };
+
+    assert_eq!(
+        scene.export_command(),
+        "ascii-animation run --config ~/.config/ascii-animation/scene.toml"
+    );
+}
 #[test]
 fn single_instance_with_non_default_metadata_exports_config_command() {
     for instance in [
