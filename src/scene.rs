@@ -123,6 +123,10 @@ impl Scene {
     }
 
     fn validate(self) -> Result<Self> {
+        if self.instances.is_empty() {
+            return Err(AsciiAnimError::EmptyScene);
+        }
+
         let registry = PresetRegistry::default();
         for instance in &self.instances {
             let descriptor = registry.get(&instance.preset)?;

@@ -38,6 +38,9 @@ pub enum AsciiAnimError {
         input_source: &'static str,
         conflicts: String,
     },
+    #[error("scene must contain at least one animation instance")]
+    EmptyScene,
+
 
     #[error("failed to parse scene config at {path}: {source}")]
     SceneConfigParse {

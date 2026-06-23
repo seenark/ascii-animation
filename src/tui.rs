@@ -134,6 +134,20 @@ impl TuiState {
     }
 
     pub fn cycle_selected_placement(&mut self, delta: i32) {
+        let custom = match &self.selected_instance().placement {
+            Placement::Custom {
+                x,
+                y,
+                width,
+                height,
+            } => Placement::Custom {
+                x: *x,
+                y: *y,
+                width: *width,
+                height: *height,
+            },
+            _ => default_custom_placement(),
+        };
         let placements = [
             Placement::Center,
             Placement::Top,
@@ -141,6 +155,7 @@ impl TuiState {
             Placement::Left,
             Placement::Right,
             Placement::Fill,
+            custom,
         ];
         let current = match &self.selected_instance().placement {
             Placement::Center => 0,
@@ -149,7 +164,7 @@ impl TuiState {
             Placement::Left => 3,
             Placement::Right => 4,
             Placement::Fill => 5,
-            Placement::Custom { .. } => 0,
+            Placement::Custom { .. } => 6,
         };
         let next = (current + delta).rem_euclid(placements.len() as i32) as usize;
         self.selected_instance_mut().placement = placements[next].clone();
@@ -426,6 +441,15 @@ fn placement_label(placement: &Placement) -> &'static str {
         Placement::Right => "right",
         Placement::Fill => "fill",
         Placement::Custom { .. } => "custom",
+    }
+}
+
+fn default_custom_placement() -> Placement {
+    Placement::Custom {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 12,
     }
 }
 

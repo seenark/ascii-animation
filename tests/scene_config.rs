@@ -205,6 +205,22 @@ fn load_from_path_rejects_invalid_option_value() {
             if option == "palette" && actual == "invalid"
     ));
 }
+#[test]
+fn load_from_path_rejects_empty_scenes() {
+    let scene = Scene {
+        frame_rate: 24,
+        color: false,
+        instances: vec![],
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scene.toml");
+    write_scene(&scene, &path);
+
+    let err = Scene::load_from_path(&path).unwrap_err();
+
+    assert!(matches!(err, AsciiAnimError::EmptyScene));
+}
+
 
 #[test]
 fn tui_state_starts_with_galaxy_and_exports_command() {
@@ -311,6 +327,27 @@ fn tui_state_can_edit_selected_instance_structure() {
     assert_eq!(instance.layer, Layer::Foreground);
     assert_eq!(instance.z_index, 3);
     assert_eq!(instance.preset, "galaxy");
+}
+#[test]
+fn tui_state_cycles_through_custom_placement_without_collapsing_it() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+
+    state.set_selected_placement(Placement::Fill);
+    state.cycle_selected_placement(1);
+    assert!(matches!(
+        state.selected_instance().placement,
+        Placement::Custom { .. }
+    ));
+
+    state.set_selected_placement(Placement::Custom {
+        x: 2,
+        y: 3,
+        width: 20,
+        height: 10,
+    });
+    state.cycle_selected_placement(1);
+    assert_eq!(state.selected_instance().placement, Placement::Center);
 }
 
 #[test]
