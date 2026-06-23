@@ -63,3 +63,32 @@ DONE_WITH_CONCERNS
 ## Commit
 - `ea5e0b4db9da8d47945d56665d14efeba837529b` — `fix: close final branch review gaps`
 - `816491948d4154d0db549e3e7c945852e78b5156` — `docs: add task 10 fix report`
+
+## Final Review Fixes
+- Commit: `da3c61836f98ca22ac367d23fa9d2dc8026771c5` — `fix: address final branch review findings`
+- Summary:
+  - `Scene::export_command()` now falls back to `ascii-animation run --config ~/.config/ascii-animation/scene.toml` whenever a single-instance scene has non-default placement, layer, `z_index`, or `enabled` metadata.
+  - Direct runtime exit now requires actual Ctrl-C; `q` and `Esc` no longer exit `ascii-animation run ...`.
+  - Added focused regressions for both findings.
+- Files changed:
+  - `src/scene.rs`
+  - `src/runtime.rs`
+  - `tests/scene_config.rs`
+- Exact commands and outputs:
+  1. `cargo test --test scene_config`
+     ```text
+     ✓ cargo test: 16 passed (1 suite, 0.01s)
+     ```
+  2. `cargo test --test cli`
+     ```text
+     ✓ cargo test: 11 passed (1 suite, 0.00s)
+     ```
+  3. `cargo test`
+     ```text
+     ✓ cargo test: 51 passed (8 suites, 0.03s)
+     ```
+- Self-review notes:
+  - Export fallback stays minimal by checking whether the single instance still matches the direct-run CLI shape.
+  - Runtime quit handling now matches the spec exactly instead of sharing the TUI's `q`/`Esc` shortcuts.
+- Concerns:
+  - Unrelated pre-existing worktree changes remain in `src/render/ansi.rs`, `src/render/buffer.rs`, `src/render/layout.rs`, `tests/galaxy.rs`, plus untracked `.superpowers/sdd/progress.md` and `target/`.
