@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use ascii_animation::presets::OptionValue;
+use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
+use ascii_animation::tui::TuiState;
 use ascii_animation::AsciiAnimError;
 
 fn galaxy_instance(id: &str) -> AnimationInstance {
@@ -164,4 +165,72 @@ fn load_from_path_rejects_invalid_option_value() {
         AsciiAnimError::InvalidChoice { option, actual, .. }
             if option == "palette" && actual == "invalid"
     ));
+}
+
+#[test]
+fn tui_state_starts_with_galaxy_and_exports_command() {
+    let registry = build_default_registry();
+    let state = TuiState::default_with_registry(&registry).unwrap();
+
+    assert_eq!(state.scene.instances.len(), 1);
+    assert_eq!(state.scene.instances[0].preset, "galaxy");
+    assert!(state.export_command().starts_with("ascii-animation run galaxy"));
+}
+
+#[test]
+fn tui_state_can_adjust_integer_option() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.select_option_by_name("arms").unwrap();
+
+    state.adjust_selected_option(1).unwrap();
+
+    assert_eq!(
+        state.scene.instances[0]
+            .options
+            .get("arms")
+            .unwrap()
+            .as_cli_value(),
+        "4"
+    );
+}
+
+#[test]
+fn tui_state_clamps_integer_option_to_descriptor_bounds() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.select_option_by_name("arms").unwrap();
+
+    for _ in 0..10 {
+        state.adjust_selected_option(-1).unwrap();
+    }
+
+    assert_eq!(
+        state.scene.instances[0]
+            .options
+            .get("arms")
+            .unwrap()
+            .as_cli_value(),
+        "1"
+    );
+}
+
+#[test]
+fn tui_state_clamps_float_option_to_descriptor_bounds() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.select_option_by_name("noise").unwrap();
+
+    for _ in 0..100 {
+        state.adjust_selected_option(1).unwrap();
+    }
+
+    assert_eq!(
+        state.scene.instances[0]
+            .options
+            .get("noise")
+            .unwrap()
+            .as_cli_value(),
+        "0.5"
+    );
 }
