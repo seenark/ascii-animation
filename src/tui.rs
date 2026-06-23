@@ -58,6 +58,19 @@ impl TuiState {
         self.scene.export_command()
     }
 
+    pub fn preview_text(
+        &self,
+        registry: &PresetRegistry,
+        elapsed_secs: f64,
+        width: u16,
+        height: u16,
+    ) -> String {
+        render_scene_frame(&self.scene, registry, 0, elapsed_secs, width, height)
+            .map(|buffer| render_to_ansi(&buffer, self.scene.color))
+            .unwrap_or_else(|err| err.to_string())
+    }
+
+
     pub fn select_option_by_name(&mut self, name: &str) -> Result<()> {
         self.selected_option = self
             .option_names
@@ -154,16 +167,8 @@ fn run_loop(
 
                 let preview_width = chunks[0].width.saturating_sub(2).max(1);
                 let preview_height = chunks[0].height.saturating_sub(2).max(1);
-                let preview = render_scene_frame(
-                    &state.scene,
-                    registry,
-                    0,
-                    started.elapsed().as_secs_f64(),
-                    preview_width,
-                    preview_height,
-                )
-                .map(|buffer| render_to_ansi(&buffer, false))
-                .unwrap_or_else(|err| err.to_string());
+                let preview =
+                    state.preview_text(registry, started.elapsed().as_secs_f64(), preview_width, preview_height);
                 frame.render_widget(
                     Paragraph::new(preview)
                         .block(Block::default().title("Preview").borders(Borders::ALL)),

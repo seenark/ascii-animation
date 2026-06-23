@@ -234,3 +234,16 @@ fn tui_state_clamps_float_option_to_descriptor_bounds() {
         "0.5"
     );
 }
+
+#[test]
+fn tui_preview_uses_scene_color_flag() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    let color_preview = state.preview_text(&registry, 0.0, 40, 16);
+    assert!(color_preview.contains("\u{1b}["));
+
+    state.scene.color = false;
+    let monochrome_preview = state.preview_text(&registry, 0.0, 40, 16);
+
+    assert!(!monochrome_preview.contains("\u{1b}["));
+}
