@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 
-use crate::presets::OptionValue;
+use crate::presets::{OptionValue, PresetRegistry};
 use crate::{AsciiAnimError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -66,16 +67,19 @@ impl Default for Scene {
 
 impl Scene {
     pub fn default_config_path() -> PathBuf {
-        PathBuf::from("~/.config/ascii-animation/scene.toml")
+        BaseDirs::new()
+            .map(|dirs| dirs.home_dir().join(".config/ascii-animation/scene.toml"))
+            .unwrap_or_else(|| PathBuf::from(".config/ascii-animation/scene.toml"))
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|source| AsciiAnimError::Terminal(source.to_string()))?;
-        toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
+        let scene: Self = toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+        scene.validate()
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
@@ -112,5 +116,14 @@ impl Scene {
         } else {
             "ascii-animation run --config ~/.config/ascii-animation/scene.toml".to_string()
         }
+    }
+
+    fn validate(self) -> Result<Self> {
+        let registry = PresetRegistry::default();
+        for instance in &self.instances {
+            let descriptor = registry.get(&instance.preset)?;
+            descriptor.validate_options(&instance.options)?;
+        }
+        Ok(self)
     }
 }
