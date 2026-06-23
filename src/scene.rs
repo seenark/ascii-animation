@@ -66,11 +66,7 @@ impl Default for Scene {
 
 impl Scene {
     pub fn default_config_path() -> PathBuf {
-        if let Some(project_dirs) = directories::ProjectDirs::from("", "", "ascii-animation") {
-            project_dirs.config_dir().join("scene.toml")
-        } else {
-            PathBuf::from(".config/ascii-animation/scene.toml")
-        }
+        PathBuf::from("~/.config/ascii-animation/scene.toml")
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {

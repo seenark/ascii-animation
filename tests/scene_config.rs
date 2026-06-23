@@ -62,3 +62,11 @@ fn multi_instance_exports_config_command() {
         "ascii-animation run --config ~/.config/ascii-animation/scene.toml"
     );
 }
+
+#[test]
+fn default_config_path_uses_mandated_shape() {
+    assert_eq!(
+        Scene::default_config_path(),
+        std::path::PathBuf::from("~/.config/ascii-animation/scene.toml")
+    );
+}
