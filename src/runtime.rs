@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::{Hide, MoveTo, Show};
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
@@ -139,13 +139,7 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
 
     loop {
         if terminal.poll(Duration::from_millis(1)).map_err(terminal_error)? {
-            if matches!(
-                terminal.read().map_err(terminal_error)?,
-                Event::Key(key)
-                    if key.code == KeyCode::Char('q')
-                        || key.code == KeyCode::Esc
-                        || key.code == KeyCode::Char('c')
-            ) {
+            if should_exit_scene_loop(&terminal.read().map_err(terminal_error)?) {
                 break;
             }
         }
@@ -167,6 +161,17 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
     }
 
     Ok(())
+}
+
+fn should_exit_scene_loop(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Key(key)
+            if key.code == KeyCode::Esc
+                || key.code == KeyCode::Char('q')
+                || (key.code == KeyCode::Char('c')
+                    && key.modifiers.contains(KeyModifiers::CONTROL))
+    )
 }
 
 fn desired_dimensions(
@@ -235,4 +240,97 @@ fn restore_scene_terminal<W: Write, T: TerminalDriver>(
 
 fn terminal_error(err: io::Error) -> AsciiAnimError {
     AsciiAnimError::Terminal(err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use std::collections::VecDeque;
+
+    struct LoopTerminal {
+        events: VecDeque<Event>,
+        size_calls: usize,
+    }
+
+    impl TerminalDriver for LoopTerminal {
+        fn enable_raw_mode(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn disable_raw_mode(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn setup_scene_terminal<W: Write>(&mut self, _stdout: &mut W) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn restore_scene_terminal<W: Write>(&mut self, _stdout: &mut W) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn poll(&mut self, _timeout: Duration) -> io::Result<bool> {
+            Ok(!self.events.is_empty())
+        }
+
+        fn read(&mut self) -> io::Result<Event> {
+            self.events
+                .pop_front()
+                .ok_or_else(|| io::Error::other("no queued event"))
+        }
+
+        fn size(&mut self) -> io::Result<(u16, u16)> {
+            self.size_calls += 1;
+            Ok((20, 8))
+        }
+    }
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
+        Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        })
+    }
+
+    fn scene() -> Scene {
+        Scene {
+            frame_rate: 1000,
+            color: false,
+            instances: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn plain_c_does_not_exit_scene_loop() {
+        let registry = PresetRegistry::default();
+        let mut stdout = Vec::new();
+        let mut terminal = LoopTerminal {
+            events: VecDeque::from([
+                key(KeyCode::Char('c'), KeyModifiers::NONE),
+                key(KeyCode::Char('q'), KeyModifiers::NONE),
+            ]),
+            size_calls: 0,
+        };
+
+        run_scene_loop(&mut stdout, &mut terminal, scene(), &registry, 1).unwrap();
+
+        assert_eq!(terminal.size_calls, 1);
+    }
+
+    #[test]
+    fn ctrl_c_exits_scene_loop() {
+        let registry = PresetRegistry::default();
+        let mut stdout = Vec::new();
+        let mut terminal = LoopTerminal {
+            events: VecDeque::from([key(KeyCode::Char('c'), KeyModifiers::CONTROL)]),
+            size_calls: 0,
+        };
+
+        run_scene_loop(&mut stdout, &mut terminal, scene(), &registry, 1).unwrap();
+
+        assert_eq!(terminal.size_calls, 0);
+    }
 }
