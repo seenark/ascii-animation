@@ -6,13 +6,55 @@ use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
-use crate::presets::{galaxy, PresetRegistry};
+use crate::presets::{galaxy, OptionValue, PresetDescriptor, PresetRegistry};
 use crate::render::ansi::render_to_ansi;
 use crate::render::buffer::FrameBuffer;
 use crate::render::layout::resolve_placement;
 use crate::render::{AnimationRenderer, RenderContext};
-use crate::scene::Scene;
+use crate::scene::{AnimationInstance, Placement, Scene};
 use crate::{AsciiAnimError, Result};
+
+pub trait TerminalDriver {
+    fn enable_raw_mode(&mut self) -> io::Result<()>;
+    fn disable_raw_mode(&mut self) -> io::Result<()>;
+    fn setup_scene_terminal<W: Write>(&mut self, stdout: &mut W) -> io::Result<()>;
+    fn restore_scene_terminal<W: Write>(&mut self, stdout: &mut W) -> io::Result<()>;
+    fn poll(&mut self, timeout: Duration) -> io::Result<bool>;
+    fn read(&mut self) -> io::Result<Event>;
+    fn size(&mut self) -> io::Result<(u16, u16)>;
+}
+
+struct CrosstermDriver;
+
+impl TerminalDriver for CrosstermDriver {
+    fn enable_raw_mode(&mut self) -> io::Result<()> {
+        terminal::enable_raw_mode()
+    }
+
+    fn disable_raw_mode(&mut self) -> io::Result<()> {
+        terminal::disable_raw_mode()
+    }
+
+    fn setup_scene_terminal<W: Write>(&mut self, stdout: &mut W) -> io::Result<()> {
+        execute!(stdout, EnterAlternateScreen, Hide)
+    }
+
+    fn restore_scene_terminal<W: Write>(&mut self, stdout: &mut W) -> io::Result<()> {
+        execute!(stdout, Show, LeaveAlternateScreen)
+    }
+
+    fn poll(&mut self, timeout: Duration) -> io::Result<bool> {
+        event::poll(timeout)
+    }
+
+    fn read(&mut self) -> io::Result<Event> {
+        event::read()
+    }
+
+    fn size(&mut self) -> io::Result<(u16, u16)> {
+        terminal::size()
+    }
+}
 
 pub fn render_scene_frame(
     scene: &Scene,
@@ -27,8 +69,16 @@ pub fn render_scene_frame(
         if !instance.enabled {
             continue;
         }
-        registry.get(&instance.preset)?;
-        let rect = resolve_placement(&instance.placement, width, height, width, height);
+        let descriptor = registry.get(&instance.preset)?;
+        let (desired_width, desired_height) =
+            desired_dimensions(instance, descriptor, width, height);
+        let rect = resolve_placement(
+            &instance.placement,
+            width,
+            height,
+            desired_width,
+            desired_height,
+        );
         if instance.preset == "galaxy" {
             let mut renderer = galaxy::renderer(&instance.options, seed + order as u64)?;
             renderer.render(
@@ -49,23 +99,37 @@ pub fn render_scene_frame(
     Ok(frame)
 }
 
+pub fn prepare_scene_terminal<W: Write, T: TerminalDriver>(
+    stdout: &mut W,
+    terminal: &mut T,
+) -> Result<()> {
+    terminal.enable_raw_mode().map_err(terminal_error)?;
+    if let Err(err) = terminal.setup_scene_terminal(stdout) {
+        return match terminal.disable_raw_mode() {
+            Ok(()) => Err(terminal_error(err)),
+            Err(disable_err) => Err(AsciiAnimError::Terminal(format!(
+                "{}; additionally failed to disable raw mode: {}",
+                err, disable_err
+            ))),
+        };
+    }
+    Ok(())
+}
+
 pub fn run_scene(scene: Scene, registry: &PresetRegistry, seed: u64) -> Result<()> {
     let mut stdout = io::stdout();
-    terminal::enable_raw_mode().map_err(|err| AsciiAnimError::Terminal(err.to_string()))?;
-    execute!(stdout, EnterAlternateScreen, Hide)
-        .map_err(|err| AsciiAnimError::Terminal(err.to_string()))?;
+    let mut terminal = CrosstermDriver;
+    prepare_scene_terminal(&mut stdout, &mut terminal)?;
 
-    let result = run_scene_loop(&mut stdout, scene, registry, seed);
-
-    let restore_result = execute!(stdout, Show, LeaveAlternateScreen)
-        .and_then(|_| terminal::disable_raw_mode())
-        .map_err(|err| AsciiAnimError::Terminal(err.to_string()));
+    let result = run_scene_loop(&mut stdout, &mut terminal, scene, registry, seed);
+    let restore_result = restore_scene_terminal(&mut stdout, &mut terminal);
 
     result.and(restore_result)
 }
 
-fn run_scene_loop(
-    stdout: &mut io::Stdout,
+fn run_scene_loop<W: Write, T: TerminalDriver>(
+    stdout: &mut W,
+    terminal: &mut T,
     scene: Scene,
     registry: &PresetRegistry,
     seed: u64,
@@ -74,11 +138,9 @@ fn run_scene_loop(
     let frame_duration = Duration::from_millis(1000 / scene.frame_rate.max(1) as u64);
 
     loop {
-        if event::poll(Duration::from_millis(1))
-            .map_err(|err| AsciiAnimError::Terminal(err.to_string()))?
-        {
+        if terminal.poll(Duration::from_millis(1)).map_err(terminal_error)? {
             if matches!(
-                event::read().map_err(|err| AsciiAnimError::Terminal(err.to_string()))?,
+                terminal.read().map_err(terminal_error)?,
                 Event::Key(key)
                     if key.code == KeyCode::Char('q')
                         || key.code == KeyCode::Esc
@@ -88,8 +150,7 @@ fn run_scene_loop(
             }
         }
 
-        let (width, height) =
-            terminal::size().map_err(|err| AsciiAnimError::Terminal(err.to_string()))?;
+        let (width, height) = terminal.size().map_err(terminal_error)?;
         let frame = render_scene_frame(
             &scene,
             registry,
@@ -99,14 +160,79 @@ fn run_scene_loop(
             height,
         )?;
         let output = render_to_ansi(&frame, scene.color);
-        execute!(stdout, MoveTo(0, 0), Clear(ClearType::All))
-            .map_err(|err| AsciiAnimError::Terminal(err.to_string()))?;
-        write!(stdout, "{}", output).map_err(|err| AsciiAnimError::Terminal(err.to_string()))?;
-        stdout
-            .flush()
-            .map_err(|err| AsciiAnimError::Terminal(err.to_string()))?;
+        execute!(stdout, MoveTo(0, 0), Clear(ClearType::All)).map_err(terminal_error)?;
+        write!(stdout, "{}", output).map_err(terminal_error)?;
+        stdout.flush().map_err(terminal_error)?;
         std::thread::sleep(frame_duration);
     }
 
     Ok(())
+}
+
+fn desired_dimensions(
+    instance: &AnimationInstance,
+    descriptor: &PresetDescriptor,
+    frame_width: u16,
+    frame_height: u16,
+) -> (u16, u16) {
+    if matches!(
+        instance.placement,
+        Placement::Fill | Placement::Custom { .. }
+    ) {
+        return (frame_width, frame_height);
+    }
+
+    let Some(size_percent) = instance
+        .options
+        .get("size")
+        .and_then(int_option)
+        .or_else(|| default_int_option(descriptor, "size"))
+    else {
+        return (frame_width, frame_height);
+    };
+
+    (
+        scaled_dimension(frame_width, size_percent),
+        scaled_dimension(frame_height, size_percent),
+    )
+}
+
+fn default_int_option(descriptor: &PresetDescriptor, name: &str) -> Option<u16> {
+    descriptor
+        .options()
+        .iter()
+        .find(|option| option.name() == name)
+        .and_then(|option| int_option(option.default()))
+}
+
+fn int_option(value: &OptionValue) -> Option<u16> {
+    match value {
+        OptionValue::Int(value) => u16::try_from(*value).ok(),
+        _ => None,
+    }
+}
+
+fn scaled_dimension(total: u16, percent: u16) -> u16 {
+    ((total as u32 * percent as u32) / 100).max(1) as u16
+}
+
+fn restore_scene_terminal<W: Write, T: TerminalDriver>(
+    stdout: &mut W,
+    terminal: &mut T,
+) -> Result<()> {
+    let restore_err = terminal.restore_scene_terminal(stdout).err();
+    let disable_err = terminal.disable_raw_mode().err();
+    match (restore_err, disable_err) {
+        (None, None) => Ok(()),
+        (Some(err), None) => Err(terminal_error(err)),
+        (None, Some(err)) => Err(terminal_error(err)),
+        (Some(restore_err), Some(disable_err)) => Err(AsciiAnimError::Terminal(format!(
+            "{}; additionally failed to disable raw mode: {}",
+            restore_err, disable_err
+        ))),
+    }
+}
+
+fn terminal_error(err: io::Error) -> AsciiAnimError {
+    AsciiAnimError::Terminal(err.to_string())
 }

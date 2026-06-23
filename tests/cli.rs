@@ -7,7 +7,7 @@ use clap::Parser;
 use ascii_animation::cli::{scene_from_run_args, Cli, Command};
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::render::ansi::render_to_ansi;
-use ascii_animation::runtime::render_scene_frame;
+use ascii_animation::runtime::{prepare_scene_terminal, render_scene_frame, TerminalDriver};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
 static HOME_LOCK: Mutex<()> = Mutex::new(());
@@ -133,4 +133,71 @@ fn direct_scene_renders_non_empty_frame() {
 
     assert_eq!(text.lines().count(), 16);
     assert!(text.chars().any(|ch| ch != ' ' && ch != '\n'));
+}
+
+#[test]
+fn render_scene_frame_respects_non_fill_placement() {
+    let registry = build_default_registry();
+    let mut scene = galaxy_scene(false);
+    scene.instances[0].placement = Placement::Right;
+    scene.instances[0]
+        .options
+        .insert("size".to_string(), OptionValue::Int(20));
+
+    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
+
+    assert!((0..20).all(|x| (0..16).all(|y| frame.get(x, y).unwrap().ch == ' ')));
+    assert!((20..40).any(|x| (0..16).any(|y| frame.get(x, y).unwrap().ch != ' ')));
+}
+
+struct FailingTerminal {
+    raw_enabled: bool,
+    raw_disabled: bool,
+}
+
+impl TerminalDriver for FailingTerminal {
+    fn enable_raw_mode(&mut self) -> std::io::Result<()> {
+        self.raw_enabled = true;
+        Ok(())
+    }
+
+    fn disable_raw_mode(&mut self) -> std::io::Result<()> {
+        self.raw_disabled = true;
+        Ok(())
+    }
+
+    fn setup_scene_terminal<W: std::io::Write>(&mut self, _stdout: &mut W) -> std::io::Result<()> {
+        Err(std::io::Error::other("setup failed"))
+    }
+
+    fn restore_scene_terminal<W: std::io::Write>(&mut self, _stdout: &mut W) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn poll(&mut self, _timeout: std::time::Duration) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
+    fn read(&mut self) -> std::io::Result<crossterm::event::Event> {
+        unreachable!("read should not be called")
+    }
+
+    fn size(&mut self) -> std::io::Result<(u16, u16)> {
+        Ok((40, 16))
+    }
+}
+
+#[test]
+fn prepare_scene_terminal_disables_raw_mode_when_setup_fails() {
+    let mut terminal = FailingTerminal {
+        raw_enabled: false,
+        raw_disabled: false,
+    };
+    let mut stdout = Vec::new();
+
+    let err = prepare_scene_terminal(&mut stdout, &mut terminal).unwrap_err();
+
+    assert_eq!(err.to_string(), "terminal error: setup failed");
+    assert!(terminal.raw_enabled);
+    assert!(terminal.raw_disabled);
 }
