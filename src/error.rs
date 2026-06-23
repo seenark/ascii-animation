@@ -48,4 +48,4 @@ pub enum AsciiAnimError {
     Terminal(String),
 }
 
-pub type Result<T, E = AsciiAnimError> = std::result::Result<T, E>;
+pub type Result<T> = std::result::Result<T, AsciiAnimError>;
