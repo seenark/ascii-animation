@@ -133,8 +133,12 @@ impl GalaxyOptions {
             noise: get_float(values, "noise")?,
             glow: get_float(values, "glow")?,
             twinkle: get_float(values, "twinkle")?,
-            palette: get_choice(values, "palette")?,
-            gradient: get_choice(values, "gradient")?,
+            palette: get_choice(
+                values,
+                "palette",
+                &["cosmic", "stardust", "nebula", "rainbow", "ice", "mono"],
+            )?,
+            gradient: get_choice(values, "gradient", &["smooth", "classic", "starry", "block"])?,
         })
     }
 }
@@ -196,9 +200,14 @@ fn get_float(values: &BTreeMap<String, OptionValue>, key: &str) -> Result<f64> {
     }
 }
 
-fn get_choice(values: &BTreeMap<String, OptionValue>, key: &str) -> Result<String> {
+fn get_choice(values: &BTreeMap<String, OptionValue>, key: &str, choices: &[&str]) -> Result<String> {
     match values.get(key) {
-        Some(OptionValue::Choice(value)) => Ok(value.clone()),
+        Some(OptionValue::Choice(value)) if choices.contains(&value.as_str()) => Ok(value.clone()),
+        Some(OptionValue::Choice(value)) => Err(AsciiAnimError::InvalidChoice {
+            option: key.to_string(),
+            choices: choices.iter().map(|choice| choice.to_string()).collect(),
+            actual: value.clone(),
+        }),
         Some(value) => Err(AsciiAnimError::InvalidOptionType {
             option: key.to_string(),
             expected: "choice",

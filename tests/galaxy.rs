@@ -44,3 +44,35 @@ fn galaxy_frame_is_deterministic_with_fixed_seed() {
 
     insta::assert_snapshot!(frame.to_plain_text());
 }
+
+#[test]
+fn galaxy_renderer_rejects_unknown_palette_choice() {
+    let mut options = galaxy::descriptor().defaults();
+    options.insert(
+        "palette".to_string(),
+        ascii_animation::presets::OptionValue::Choice("aurora".to_string()),
+    );
+
+    let err = galaxy::renderer(&options, 7).unwrap_err().to_string();
+
+    assert_eq!(
+        err,
+        "invalid choice for `palette`: expected one of [\"cosmic\", \"stardust\", \"nebula\", \"rainbow\", \"ice\", \"mono\"], got `aurora`"
+    );
+}
+
+#[test]
+fn galaxy_renderer_rejects_unknown_gradient_choice() {
+    let mut options = galaxy::descriptor().defaults();
+    options.insert(
+        "gradient".to_string(),
+        ascii_animation::presets::OptionValue::Choice("plasma".to_string()),
+    );
+
+    let err = galaxy::renderer(&options, 7).unwrap_err().to_string();
+
+    assert_eq!(
+        err,
+        "invalid choice for `gradient`: expected one of [\"smooth\", \"classic\", \"starry\", \"block\"], got `plasma`"
+    );
+}
