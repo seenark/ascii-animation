@@ -37,6 +37,16 @@ fn later_instance_order_breaks_same_layer_and_z_ties() {
 }
 
 #[test]
+fn equal_instance_order_does_not_break_ties() {
+    let mut frame = FrameBuffer::new(1, 1);
+
+    frame.put_cell(0, 0, cell('a', Layer::Normal, 1, 0));
+    frame.put_cell(0, 0, cell('b', Layer::Normal, 1, 0));
+
+    assert_eq!(frame.get(0, 0).unwrap().ch, 'a');
+}
+
+#[test]
 fn spaces_are_transparent() {
     let mut frame = FrameBuffer::new(1, 1);
 

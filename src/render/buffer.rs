@@ -52,7 +52,7 @@ impl Cell {
             || (self.layer.priority() == current.layer.priority() && self.z_index > current.z_index)
             || (self.layer.priority() == current.layer.priority()
                 && self.z_index == current.z_index
-                && self.order >= current.order)
+                && self.order > current.order)
     }
 }
 
