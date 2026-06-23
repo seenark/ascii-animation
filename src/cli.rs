@@ -3,15 +3,19 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::error::AsciiAnimError;
 use crate::presets::{build_default_registry, OptionValue, PresetRegistry};
 use crate::runtime;
-use crate::error::AsciiAnimError;
 use crate::scene::{AnimationInstance, Layer, Placement, Scene};
 use crate::tui;
 use crate::Result;
 
 #[derive(Debug, Parser)]
-#[command(name = "ascii-animation", version, about = "Run preset ASCII animations in the terminal")]
+#[command(
+    name = "ascii-animation",
+    version,
+    about = "Run preset ASCII animations in the terminal"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -19,7 +23,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Run(RunArgs),
+    Run(Box<RunArgs>),
     Tui(TuiArgs),
 }
 

@@ -15,7 +15,10 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 fn galaxy_scene(color: bool) -> Scene {
     let mut options = BTreeMap::new();
     options.insert("arms".to_string(), OptionValue::Int(3));
-    options.insert("palette".to_string(), OptionValue::Choice("cosmic".to_string()));
+    options.insert(
+        "palette".to_string(),
+        OptionValue::Choice("cosmic".to_string()),
+    );
 
     Scene {
         frame_rate: 24,
@@ -47,15 +50,38 @@ fn parses_direct_galaxy_command() {
         "--no-color",
     ]);
 
-    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
     let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
 
     assert!(!scene.color);
     assert_eq!(scene.instances.len(), 1);
     assert_eq!(scene.instances[0].preset, "galaxy");
-    assert_eq!(scene.instances[0].options.get("arms").unwrap().as_cli_value(), "4");
-    assert_eq!(scene.instances[0].options.get("stars").unwrap().as_cli_value(), "700");
-    assert_eq!(scene.instances[0].options.get("palette").unwrap().as_cli_value(), "mono");
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("arms")
+            .unwrap()
+            .as_cli_value(),
+        "4"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("stars")
+            .unwrap()
+            .as_cli_value(),
+        "700"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("palette")
+            .unwrap()
+            .as_cli_value(),
+        "mono"
+    );
 }
 
 #[test]
@@ -64,13 +90,10 @@ fn preserves_config_scene_color_without_no_color() {
     let path = dir.path().join("scene.toml");
     galaxy_scene(false).save_to_path(&path).unwrap();
 
-    let cli = Cli::parse_from([
-        "ascii-animation",
-        "run",
-        "--config",
-        path.to_str().unwrap(),
-    ]);
-    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let cli = Cli::parse_from(["ascii-animation", "run", "--config", path.to_str().unwrap()]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
 
     let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
 
@@ -89,7 +112,9 @@ fn preserves_default_scene_color_without_no_color() {
     env::set_var("HOME", home);
 
     let cli = Cli::parse_from(["ascii-animation", "run", "--scene", "default"]);
-    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
 
     let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
 
@@ -104,9 +129,13 @@ fn preserves_default_scene_color_without_no_color() {
 #[test]
 fn rejects_unknown_scene_name() {
     let cli = Cli::parse_from(["ascii-animation", "run", "--scene", "mystery"]);
-    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
 
-    let err = scene_from_run_args(&args, &build_default_registry()).unwrap_err().to_string();
+    let err = scene_from_run_args(&args, &build_default_registry())
+        .unwrap_err()
+        .to_string();
 
     assert_eq!(err, "unknown scene: mystery");
 }
@@ -114,17 +143,33 @@ fn rejects_unknown_scene_name() {
 #[test]
 fn rejects_invalid_galaxy_option_range() {
     let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--arms", "99"]);
-    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
 
-    let err = scene_from_run_args(&args, &build_default_registry()).unwrap_err().to_string();
+    let err = scene_from_run_args(&args, &build_default_registry())
+        .unwrap_err()
+        .to_string();
 
-    assert_eq!(err, "option `arms` is out of range: expected 1..=10, got 99");
+    assert_eq!(
+        err,
+        "option `arms` is out of range: expected 1..=10, got 99"
+    );
 }
 
 #[test]
 fn direct_scene_renders_non_empty_frame() {
-    let cli = Cli::parse_from(["ascii-animation", "run", "galaxy", "--stars", "100", "--no-color"]);
-    let Command::Run(args) = cli.command else { panic!("expected run command") };
+    let cli = Cli::parse_from([
+        "ascii-animation",
+        "run",
+        "galaxy",
+        "--stars",
+        "100",
+        "--no-color",
+    ]);
+    let Command::Run(args) = cli.command else {
+        panic!("expected run command")
+    };
     let registry = build_default_registry();
     let scene = scene_from_run_args(&args, &registry).unwrap();
 
@@ -171,7 +216,10 @@ impl TerminalDriver for FailingTerminal {
         Err(std::io::Error::other("setup failed"))
     }
 
-    fn restore_scene_terminal<W: std::io::Write>(&mut self, _stdout: &mut W) -> std::io::Result<()> {
+    fn restore_scene_terminal<W: std::io::Write>(
+        &mut self,
+        _stdout: &mut W,
+    ) -> std::io::Result<()> {
         self.restored = true;
         Ok(())
     }

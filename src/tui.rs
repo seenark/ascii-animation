@@ -71,7 +71,6 @@ impl TuiState {
             .unwrap_or_else(|err| Text::from(err.to_string()))
     }
 
-
     pub fn select_option_by_name(&mut self, name: &str) -> Result<()> {
         self.selected_option = self
             .option_names
@@ -100,14 +99,12 @@ impl TuiState {
         let instance = &mut self.scene.instances[self.selected_instance];
         let option_name = self.option_names[self.selected_option].clone();
         let option_kind = self.option_kinds[self.selected_option].clone();
-        let current = instance
-            .options
-            .get(&option_name)
-            .cloned()
-            .ok_or_else(|| AsciiAnimError::UnknownOption {
+        let current = instance.options.get(&option_name).cloned().ok_or_else(|| {
+            AsciiAnimError::UnknownOption {
                 preset: instance.preset.clone(),
                 option: option_name.clone(),
-            })?;
+            }
+        })?;
         let next = match (option_kind, current) {
             (OptionKind::Int { min, max }, OptionValue::Int(value)) => {
                 OptionValue::Int((value + delta as i64).clamp(min, max))
@@ -128,12 +125,11 @@ impl TuiState {
 
 pub fn run(registry: &PresetRegistry) -> Result<()> {
     terminal::enable_raw_mode().map_err(terminal_error)?;
-    let mut entered_alt_screen = false;
     let mut stdout = io::stdout();
     if let Err(err) = execute!(stdout, EnterAlternateScreen) {
         return restore_tui_setup(false).and(Err(terminal_error(err)));
     }
-    entered_alt_screen = true;
+    let entered_alt_screen = true;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = match Terminal::new(backend) {
@@ -168,8 +164,12 @@ fn run_loop(
 
                 let preview_width = chunks[0].width.saturating_sub(2).max(1);
                 let preview_height = chunks[0].height.saturating_sub(2).max(1);
-                let preview =
-                    state.preview_text(registry, started.elapsed().as_secs_f64(), preview_width, preview_height);
+                let preview = state.preview_text(
+                    registry,
+                    started.elapsed().as_secs_f64(),
+                    preview_width,
+                    preview_height,
+                );
                 frame.render_widget(
                     Paragraph::new(preview)
                         .block(Block::default().title("Preview").borders(Borders::ALL)),
@@ -182,7 +182,11 @@ fn run_loop(
                     Line::from(""),
                 ];
                 for (index, name) in state.option_names.iter().enumerate() {
-                    let marker = if index == state.selected_option { ">" } else { " " };
+                    let marker = if index == state.selected_option {
+                        ">"
+                    } else {
+                        " "
+                    };
                     let value = instance
                         .options
                         .get(name)
@@ -255,7 +259,10 @@ fn frame_to_text(frame: &FrameBuffer, color: bool) -> Text<'static> {
             if spans.is_empty() && current_text.is_empty() {
                 current_style = style;
             } else if style != current_style {
-                spans.push(Span::styled(std::mem::take(&mut current_text), current_style));
+                spans.push(Span::styled(
+                    std::mem::take(&mut current_text),
+                    current_style,
+                ));
                 current_style = style;
             }
 
@@ -279,7 +286,10 @@ fn restore_tui_setup(entered_alt_screen: bool) -> Result<()> {
     finish_tui_restore(restore_err, disable_err)
 }
 
-fn finish_tui_restore(restore_err: Option<io::Error>, disable_err: Option<io::Error>) -> Result<()> {
+fn finish_tui_restore(
+    restore_err: Option<io::Error>,
+    disable_err: Option<io::Error>,
+) -> Result<()> {
     match (restore_err, disable_err) {
         (None, None) => Ok(()),
         (Some(err), None) => Err(terminal_error(err)),

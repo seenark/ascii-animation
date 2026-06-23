@@ -138,10 +138,12 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
     let frame_duration = Duration::from_millis(1000 / scene.frame_rate.max(1) as u64);
 
     loop {
-        if terminal.poll(Duration::from_millis(1)).map_err(terminal_error)? {
-            if should_exit_scene_loop(&terminal.read().map_err(terminal_error)?) {
-                break;
-            }
+        if terminal
+            .poll(Duration::from_millis(1))
+            .map_err(terminal_error)?
+            && should_exit_scene_loop(&terminal.read().map_err(terminal_error)?)
+        {
+            break;
         }
 
         let (width, height) = terminal.size().map_err(terminal_error)?;
