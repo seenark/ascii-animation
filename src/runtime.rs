@@ -176,9 +176,12 @@ fn desired_dimensions(
     frame_width: u16,
     frame_height: u16,
 ) -> (u16, u16) {
-    match instance.placement {
-        Placement::Fill | Placement::Custom { .. } => (frame_width, frame_height),
-        _ => (frame_width, frame_height),
+    match &instance.placement {
+        Placement::Fill => (frame_width, frame_height),
+        Placement::Center => (frame_width / 2, frame_height / 2),
+        Placement::Top | Placement::Bottom => (frame_width, frame_height / 2),
+        Placement::Left | Placement::Right => (frame_width / 2, frame_height),
+        Placement::Custom { width, height, .. } => (*width, *height),
     }
 }
 
@@ -265,10 +268,10 @@ mod tests {
     }
 
     #[test]
-    fn desired_dimensions_ignore_preset_size_option() {
+    fn desired_dimensions_match_placement_regions() {
         let mut options = std::collections::BTreeMap::new();
         options.insert("size".to_string(), crate::presets::OptionValue::Int(20));
-        let instance = AnimationInstance {
+        let right = AnimationInstance {
             id: "galaxy-1".to_string(),
             preset: "galaxy".to_string(),
             options,
@@ -277,8 +280,23 @@ mod tests {
             z_index: 0,
             enabled: true,
         };
+        let custom = AnimationInstance {
+            id: "galaxy-2".to_string(),
+            preset: "galaxy".to_string(),
+            options: std::collections::BTreeMap::new(),
+            placement: Placement::Custom {
+                x: 3,
+                y: 1,
+                width: 7,
+                height: 5,
+            },
+            layer: crate::scene::Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        };
 
-        assert_eq!(desired_dimensions(&instance, 40, 16), (40, 16));
+        assert_eq!(desired_dimensions(&right, 40, 16), (20, 16));
+        assert_eq!(desired_dimensions(&custom, 40, 16), (7, 5));
     }
 
     #[test]

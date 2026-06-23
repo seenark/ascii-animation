@@ -283,6 +283,28 @@ fn demo_renderer(
 ) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
     Ok(Box::new(FillRenderer { ch: '#' }))
 }
+fn assert_filled_region(
+    frame: &ascii_animation::render::FrameBuffer,
+    expected_x: u16,
+    expected_y: u16,
+    expected_width: u16,
+    expected_height: u16,
+) {
+    for y in 0..frame.height() {
+        for x in 0..frame.width() {
+            let expected = x >= expected_x
+                && x < expected_x + expected_width
+                && y >= expected_y
+                && y < expected_y + expected_height;
+            assert_eq!(
+                frame.get(x, y).unwrap().ch == '#',
+                expected,
+                "unexpected fill at ({x}, {y})",
+            );
+        }
+    }
+}
+
 
 #[test]
 fn render_scene_frame_dispatches_registered_presets() {
@@ -314,6 +336,46 @@ fn render_scene_frame_dispatches_registered_presets() {
     assert_eq!(frame.get(0, 0).unwrap().ch, '#');
     assert_eq!(frame.get(5, 2).unwrap().ch, '#');
 }
+#[test]
+fn render_scene_frame_uses_distinct_bounds_for_non_fill_placements() {
+    let registry = ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Test preset",
+            vec![],
+            demo_renderer,
+        ),
+    ]);
+
+    let cases = [
+        (Placement::Center, (2, 1, 4, 2)),
+        (Placement::Top, (0, 0, 8, 2)),
+        (Placement::Bottom, (0, 2, 8, 2)),
+        (Placement::Left, (0, 0, 4, 4)),
+        (Placement::Right, (4, 0, 4, 4)),
+    ];
+
+    for (placement, (x, y, width, height)) in cases {
+        let scene = Scene {
+            frame_rate: 24,
+            color: false,
+            instances: vec![AnimationInstance {
+                id: "demo-1".to_string(),
+                preset: "demo".to_string(),
+                options: BTreeMap::new(),
+                placement,
+                layer: Layer::Normal,
+                z_index: 0,
+                enabled: true,
+            }],
+        };
+
+        let frame = render_scene_frame(&scene, &registry, 1, 0.0, 8, 4).unwrap();
+        assert_filled_region(&frame, x, y, width, height);
+    }
+}
+
 
 
 #[test]
