@@ -92,3 +92,10 @@ DONE_WITH_CONCERNS
   - Runtime quit handling now matches the spec exactly instead of sharing the TUI's `q`/`Esc` shortcuts.
 - Concerns:
   - Unrelated pre-existing worktree changes remain in `src/render/ansi.rs`, `src/render/buffer.rs`, `src/render/layout.rs`, `tests/galaxy.rs`, plus untracked `.superpowers/sdd/progress.md` and `target/`.
+
+## Final verification addendum
+- Relevant fix commits: `ea5e0b4 fix: close final branch review gaps`, `8164919 docs: add task 10 fix report`, `3414d78 docs: note task 10 worktree concerns`.
+- Fresh verification on current worktree:
+  - `cargo test --test cli` -> `✓ cargo test: 15 passed (1 suite, 0.01s)`
+  - `cargo test --test scene_config` -> `✓ cargo test: 23 passed (1 suite, 0.01s)`
+  - `cargo test` -> `✓ cargo test: 65 passed (8 suites, 0.03s)`
