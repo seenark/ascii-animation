@@ -545,7 +545,7 @@ mod tests {
             }],
         };
 
-        assert_eq!(logical_scene_dimensions(&scene, &registry).unwrap().0, 188);
+        assert_eq!(logical_scene_dimensions(&scene, &registry).unwrap().0, 200);
     }
 
     #[test]

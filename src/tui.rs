@@ -78,13 +78,14 @@ impl TuiState {
     }
 
     pub fn load_startup(registry: &PresetRegistry) -> Result<Self> {
-        match Scene::load_default_config_if_available()? {
+        match Scene::load_default_config_raw_if_available()? {
             Some(scene) => Self::from_scene(scene, registry),
             None => Self::default_with_registry(registry),
         }
     }
 
     fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
+        let scene = normalize_startup_scene(scene, registry)?;
         let mut state = Self {
             last_exported_scene: RefCell::new(None),
             last_copy_status: None,
@@ -487,6 +488,32 @@ impl TuiState {
         }
         Ok(())
     }
+}
+
+fn normalize_startup_scene(mut scene: Scene, registry: &PresetRegistry) -> Result<Scene> {
+    for instance in &mut scene.instances {
+        let descriptor = registry.get(&instance.preset)?;
+        let mut raw = instance.options.clone();
+        loop {
+            match descriptor.validate_options(&raw) {
+                Ok(validated) => {
+                    instance.options = validated;
+                    break;
+                }
+                Err(
+                    AsciiAnimError::UnknownOption { option, .. }
+                    | AsciiAnimError::InvalidOptionType { option, .. }
+                    | AsciiAnimError::OptionOutOfRange { option, .. }
+                    | AsciiAnimError::InvalidChoice { option, .. }
+                    | AsciiAnimError::TextTooLong { option, .. },
+                ) => {
+                    raw.remove(&option);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+    Ok(scene)
 }
 
 pub fn run(registry: &PresetRegistry) -> Result<()> {

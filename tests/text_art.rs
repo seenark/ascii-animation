@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use figlet_rs::FIGlet;
 
 use ascii_animation::presets::{build_default_registry, text_art, OptionValue};
 use ascii_animation::render::{AnimationRenderer, FrameBuffer, RenderContext, Rgb};
@@ -17,12 +18,36 @@ fn render_context(width: u16, height: u16, elapsed_seconds: f64) -> RenderContex
     }
 }
 
+fn trim_trailing_blank_lines(content: &str) -> String {
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    while lines.last().is_some_and(|line| line.trim().is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+fn figlet_font_file(name: &str) -> FIGlet {
+    let path = format!("{}/figlet/{name}.flf", env!("CARGO_MANIFEST_DIR"));
+    let bytes = std::fs::read(path).unwrap();
+    let content = match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(err) => err.into_bytes().into_iter().map(char::from).collect(),
+    };
+    FIGlet::from_content(&trim_trailing_blank_lines(&content)).unwrap()
+}
+
+fn utf8_figlet_font_file(name: &str) -> FIGlet {
+    let path = format!("{}/figlet/{name}.flf", env!("CARGO_MANIFEST_DIR"));
+    let content = String::from_utf8(std::fs::read(path).unwrap()).unwrap();
+    FIGlet::from_content(&trim_trailing_blank_lines(&content)).unwrap()
+}
+
 fn clean_text_options(text: &str) -> BTreeMap<String, OptionValue> {
     let mut options = text_art::descriptor().defaults();
     options.insert("text".to_string(), OptionValue::Text(text.to_string()));
     options.insert(
-        "text-fill".to_string(),
-        OptionValue::Choice("hash".to_string()),
+        "text-font".to_string(),
+        OptionValue::Choice("Standard".to_string()),
     );
     options.insert(
         "text-bg".to_string(),
@@ -33,14 +58,8 @@ fn clean_text_options(text: &str) -> BTreeMap<String, OptionValue> {
         OptionValue::Choice("none".to_string()),
     );
     options.insert("text-amp".to_string(), OptionValue::Float(0.0));
-    options.insert("text-scale".to_string(), OptionValue::Float(1.0));
-    options.insert("text-spacing".to_string(), OptionValue::Int(2));
     options.insert(
         "text-drop-shadow".to_string(),
-        OptionValue::Bool(false),
-    );
-    options.insert(
-        "text-block-shadow".to_string(),
         OptionValue::Bool(false),
     );
     options.insert("text-glow".to_string(), OptionValue::Bool(false));
@@ -88,58 +107,6 @@ fn text_lines(frame: &FrameBuffer, width: u16, height: u16) -> Vec<String> {
         .collect()
 }
 
-fn expected_lines(rows: &[&str]) -> Vec<String> {
-    rows.iter().map(|row| row.trim_end().to_string()).collect()
-}
-
-const ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-const BOLD_ALPHABET: &[&str] = &[
-    " █████  ██████   ██████ ██████  ███████ ███████  ██████  ██   ██ ██      ██ ██   ██ ██      ███    ███ ███    ██  ██████  ██████   ██████  ██████  ███████ ████████ ██    ██ ██    ██ ██     ██ ██   ██ ██    ██ ███████",
-    "██   ██ ██   ██ ██      ██   ██ ██      ██      ██       ██   ██ ██      ██ ██  ██  ██      ████  ████ ████   ██ ██    ██ ██   ██ ██    ██ ██   ██ ██         ██    ██    ██ ██    ██ ██     ██  ██ ██   ██  ██     ███",
-    "███████ ██████  ██      ██   ██ █████   █████   ██   ███ ███████ ██      ██ █████   ██      ██ ████ ██ ██ ██  ██ ██    ██ ██████  ██    ██ ██████  ███████    ██    ██    ██ ██    ██ ██  █  ██   ███     ████     ███",
-    "██   ██ ██   ██ ██      ██   ██ ██      ██      ██    ██ ██   ██ ██ ██   ██ ██  ██  ██      ██  ██  ██ ██  ██ ██ ██    ██ ██      ██ ▄▄ ██ ██   ██      ██    ██    ██    ██  ██  ██  ██ ███ ██  ██ ██     ██     ███",
-    "██   ██ ██████   ██████ ██████  ███████ ██       ██████  ██   ██ ██  █████  ██   ██ ███████ ██      ██ ██   ████  ██████  ██       ██████  ██   ██ ███████    ██     ██████    ████    ███ ███  ██   ██    ██    ███████",
-    "                                                                                                                                      ▀▀",
-];
-
-const SHADOW_ALPHABET: &[&str] = &[
-    " █████╗ ██████╗  ██████╗██████╗ ███████╗███████╗ ██████╗ ██╗  ██╗██╗     ██╗██╗  ██╗██╗     ███╗   ███╗███╗   ██╗ ██████╗ ██████╗  ██████╗ ██████╗ ███████╗████████╗██╗   ██╗██╗   ██╗██╗    ██╗██╗  ██╗██╗   ██╗███████╗",
-    "██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔════╝██╔════╝██╔════╝ ██║  ██║██║     ██║██║ ██╔╝██║     ████╗ ████║████╗  ██║██╔═══██╗██╔══██╗██╔═══██╗██╔══██╗██╔════╝╚══██╔══╝██║   ██║██║   ██║██║    ██║╚██╗██╔╝╚██╗ ██╔╝╚══███╔╝",
-    "███████║██████╔╝██║     ██║  ██║█████╗  █████╗  ██║  ███╗███████║██║     ██║█████╔╝ ██║     ██╔████╔██║██╔██╗ ██║██║   ██║██████╔╝██║   ██║██████╔╝███████╗   ██║   ██║   ██║██║   ██║██║ █╗ ██║ ╚███╔╝  ╚████╔╝   ███╔╝",
-    "██╔══██║██╔══██╗██║     ██║  ██║██╔══╝  ██╔══╝  ██║   ██║██╔══██║██║██   ██║██╔═██╗ ██║     ██║╚██╔╝██║██║╚██╗██║██║   ██║██╔═══╝ ██║▄▄ ██║██╔══██╗╚════██║   ██║   ██║   ██║╚██╗ ██╔╝██║███╗██║ ██╔██╗   ╚██╔╝   ███╔╝",
-    "██║  ██║██████╔╝╚██████╗██████╔╝███████╗██║     ╚██████╔╝██║  ██║██║╚█████╔╝██║  ██╗███████╗██║ ╚═╝ ██║██║ ╚████║╚██████╔╝██║     ╚██████╔╝██║  ██║███████║   ██║   ╚██████╔╝ ╚████╔╝ ╚███╔███╔╝██╔╝ ██╗   ██║   ███████╗",
-    "╚═╝  ╚═╝╚═════╝  ╚═════╝╚═════╝ ╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚════╝ ╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝      ╚══▀▀═╝ ╚═╝  ╚═╝╚══════╝   ╚═╝    ╚═════╝   ╚═══╝   ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝",
-];
-
-const BLOCK_ALPHABET: &[&str] = &[
-    "▄████▄ █████▄ ▄█████ ████▄  ██████ ██████ ▄████  ██  ██ ██    ██ ██ ▄█▀ ██     ██▄  ▄██ ███  ██ ▄████▄ █████▄ ▄█████▄ █████▄  ▄█████ ██████ ██  ██ ██  ██ ██     ██ ██  ██ ██  ██ ██████",
-    "██▄▄██ ██▄▄██ ██     ██  ██ ██▄▄   ██▄▄  ██  ▄▄▄ ██████ ██    ██ ████   ██     ██ ▀▀ ██ ██ ▀▄██ ██  ██ ██▄▄█▀ ██ ▄ ██ ██▄▄██▄ ▀▀▀▄▄▄   ██   ██  ██ ██▄▄██ ██ ▄█▄ ██  ████   ▀██▀   ▄▄▀▀",
-    "██  ██ ██▄▄█▀ ▀█████ ████▀  ██▄▄▄▄ ██     ▀███▀  ██  ██ ██ ████▀ ██ ▀█▄ ██████ ██    ██ ██   ██ ▀████▀ ██     ▀█████▀ ██   ██ █████▀   ██   ▀████▀  ▀██▀   ▀██▀██▀  ██  ██   ██   ██████",
-    "                                                                                                                  ▀▀",
-];
-
-const DOS_ALPHABET: &[&str] = &[
-    "   █████████   ███████████    █████████  ██████████   ██████████ ███████████   █████████  █████   █████ █████       █████ █████   ████ █████       ██████   ██████ ██████   █████    ███████    ███████████     ██████    ███████████    █████████  ███████████ █████  █████ █████   █████ █████   ███   █████ █████ █████ █████ █████ ███████████",
-    "  ███░░░░░███ ░░███░░░░░███  ███░░░░░███░░███░░░░███ ░░███░░░░░█░░███░░░░░░█  ███░░░░░███░░███   ░░███ ░░███       ░░███ ░░███   ███░ ░░███       ░░██████ ██████ ░░██████ ░░███   ███░░░░░███ ░░███░░░░░███  ███░░░░███ ░░███░░░░░███  ███░░░░░███░█░░░███░░░█░░███  ░░███ ░░███   ░░███ ░░███   ░███  ░░███ ░░███ ░░███ ░░███ ░░███ ░█░░░░░░███",
-    " ░███    ░███  ░███    ░███ ███     ░░░  ░███   ░░███ ░███  █ ░  ░███   █ ░  ███     ░░░  ░███    ░███  ░███        ░███  ░███  ███    ░███        ░███░█████░███  ░███░███ ░███  ███     ░░███ ░███    ░███ ███    ░░███ ░███    ░███ ░███    ░░░ ░   ░███  ░  ░███   ░███  ░███    ░███  ░███   ░███   ░███  ░░███ ███   ░░███ ███  ░     ███░",
-    " ░███████████  ░██████████ ░███          ░███    ░███ ░██████    ░███████   ░███          ░███████████  ░███        ░███  ░███████     ░███        ░███░░███ ░███  ░███░░███░███ ░███      ░███ ░██████████ ░███     ░███ ░██████████  ░░█████████     ░███     ░███   ░███  ░███    ░███  ░███   ░███   ░███   ░░█████     ░░█████        ███",
-    " ░███░░░░░███  ░███░░░░░███░███          ░███    ░███ ░███░░█    ░███░░░█   ░███    █████ ░███░░░░░███  ░███        ░███  ░███░░███    ░███        ░███ ░░░  ░███  ░███ ░░██████ ░███      ░███ ░███░░░░░░  ░███   ██░███ ░███░░░░░███  ░░░░░░░░███    ░███     ░███   ░███  ░░███   ███   ░░███  █████  ███     ███░███     ░░███        ███",
-    " ░███    ░███  ░███    ░███░░███     ███ ░███    ███  ░███ ░   █ ░███  ░    ░░███  ░░███  ░███    ░███  ░███  ███   ░███  ░███ ░░███   ░███      █ ░███      ░███  ░███  ░░█████ ░░███     ███  ░███        ░░███ ░░████  ░███    ░███  ███    ░███    ░███     ░███   ░███   ░░░█████░     ░░░█████░█████░     ███ ░░███     ░███      ████     █",
-    " █████   █████ ███████████  ░░█████████  ██████████   ██████████ █████       ░░█████████  █████   █████ █████░░████████   █████ ░░████ ███████████ █████     █████ █████  ░░█████ ░░░███████░   █████        ░░░██████░██ █████   █████░░█████████     █████    ░░████████      ░░███         ░░███ ░░███      █████ █████    █████    ███████████",
-    "░░░░░   ░░░░░ ░░░░░░░░░░░    ░░░░░░░░░  ░░░░░░░░░░   ░░░░░░░░░░ ░░░░░         ░░░░░░░░░  ░░░░░   ░░░░░ ░░░░░  ░░░░░░░░   ░░░░░   ░░░░ ░░░░░░░░░░░ ░░░░░     ░░░░░ ░░░░░    ░░░░░    ░░░░░░░    ░░░░░           ░░░░░░ ░░ ░░░░░   ░░░░░  ░░░░░░░░░     ░░░░░      ░░░░░░░░        ░░░           ░░░   ░░░      ░░░░░ ░░░░░    ░░░░░    ░░░░░░░░░░░",
-];
-
-const DOT_MATRIX_ALPHABET: &[&str] = &[
-    "       _        _  _  _  _        _  _  _    _  _  _  _     _  _  _  _  _  _  _  _  _  _    _  _  _     _           _  _  _  _      _  _  _  _           _  _              _           _  _           _    _  _  _  _    _  _  _  _      _  _  _  _    _  _  _  _       _  _  _  _   _  _  _  _  _  _            _  _           _  _             _  _           _  _           _  _  _  _  _  _",
-    "     _(_)_     (_)(_)(_)(_) _  _ (_)(_)(_) _(_)(_)(_)(_)   (_)(_)(_)(_)(_)(_)(_)(_)(_)(_)_ (_)(_)(_) _ (_)         (_)(_)(_)(_)    (_)(_)(_)(_)       _ (_)(_)            (_) _     _ (_)(_) _       (_) _(_)(_)(_)(_)_ (_)(_)(_)(_)_  _(_)(_)(_)(_)_ (_)(_)(_)(_) _  _(_)(_)(_)(_)_(_)(_)(_)(_)(_)(_)          (_)(_)         (_)(_)           (_)(_)_       _(_)(_)_       _(_)(_)(_)(_)(_)(_)",
-    "   _(_) (_)_    (_)        (_)(_)         (_)(_)      (_)_ (_)            (_)           (_)         (_)(_)         (_)   (_)          (_)   (_)    _ (_)   (_)            (_)(_)   (_)(_)(_)(_)_     (_)(_)          (_)(_)        (_)(_)          (_)(_)         (_)(_)          (_)     (_)      (_)          (_)(_)         (_)(_)           (_)  (_)_   _(_)    (_)_   _(_)            _(_)",
-    " _(_)     (_)_  (_) _  _  _(_)(_)            (_)        (_)(_) _  _       (_) _  _      (_)    _  _  _ (_) _  _  _ (_)   (_)          (_)   (_) _ (_)      (_)            (_) (_)_(_) (_)(_)  (_)_   (_)(_)          (_)(_) _  _  _(_)(_)          (_)(_) _  _  _ (_)(_)_  _  _  _        (_)      (_)          (_)(_)_       _(_)(_)     _     (_)    (_)_(_)        (_)_(_)            _(_)",
-    "(_) _  _  _ (_) (_)(_)(_)(_)_ (_)            (_)        (_)(_)(_)(_)      (_)(_)(_)     (_)   (_)(_)(_)(_)(_)(_)(_)(_)   (_)          (_)   (_)(_) _       (_)            (_)   (_)   (_)(_)    (_)_ (_)(_)          (_)(_)(_)(_)(_)  (_)     _    (_)(_)(_)(_)(_)     (_)(_)(_)(_)_      (_)      (_)          (_)  (_)     (_)  (_)   _(_)_   (_)     _(_)_           (_)            _(_)",
-    "(_)(_)(_)(_)(_) (_)        (_)(_)          _ (_)       _(_)(_)            (_)           (_)         (_)(_)         (_)   (_)   _      (_)   (_)   (_) _    (_)            (_)         (_)(_)      (_)(_)(_)          (_)(_)           (_)    (_) _ (_)(_)   (_) _     _           (_)     (_)      (_)          (_)   (_)   (_)   (_)  (_) (_)  (_)   _(_) (_)_         (_)          _(_)",
-    "(_)         (_) (_)_  _  _ (_)(_) _  _  _ (_)(_)_  _  (_)  (_) _  _  _  _ (_)           (_) _  _  _ (_)(_)         (_) _ (_) _(_)  _  (_)   (_)      (_) _ (_) _  _  _  _ (_)         (_)(_)         (_)(_)_  _  _  _(_)(_)           (_)_  _  _(_) _ (_)      (_) _ (_)_  _  _  _(_)     (_)      (_)_  _  _  _(_)    (_)_(_)    (_)_(_)   (_)_(_) _(_)     (_)_       (_)       _ (_) _  _  _",
-    "(_)         (_)(_)(_)(_)(_)      (_)(_)(_)  (_)(_)(_)(_)   (_)(_)(_)(_)(_)(_)              (_)(_)(_)(_)(_)         (_)(_)(_)(_)(_)(_)(_)    (_)         (_)(_)(_)(_)(_)(_)(_)         (_)(_)         (_)  (_)(_)(_)(_)  (_)             (_)(_)(_)  (_)(_)         (_)  (_)(_)(_)(_)       (_)        (_)(_)(_)(_)        (_)        (_)       (_)  (_)         (_)      (_)      (_)(_)(_)(_)(_)",
-];
 
 fn count_char(frame: &FrameBuffer, target: char) -> usize {
     frame.cells().iter().filter(|cell| cell.ch == target).count()
@@ -149,6 +116,15 @@ fn count_char(frame: &FrameBuffer, target: char) -> usize {
 fn text_art_descriptor_has_required_options_and_defaults() {
     let descriptor = text_art::descriptor();
     let defaults = descriptor.defaults();
+    let font_option = descriptor
+        .options()
+        .iter()
+        .find(|option| option.name() == "text-font")
+        .unwrap();
+    let font_choices = match font_option.kind() {
+        ascii_animation::presets::OptionKind::Choice { choices } => choices,
+        other => panic!("text-font must be choice option, got {other:?}"),
+    };
 
     assert_eq!(descriptor.name(), "text-art");
     assert_eq!(defaults.get("text").unwrap().as_cli_value(), "HELLO");
@@ -156,8 +132,11 @@ fn text_art_descriptor_has_required_options_and_defaults() {
         defaults.get("text-overflow").unwrap().as_cli_value(),
         "extend"
     );
-    assert_eq!(defaults.get("text-font").unwrap().as_cli_value(), "block");
-    assert_eq!(defaults.get("text-fill").unwrap().as_cli_value(), "auto");
+    assert_eq!(defaults.get("text-font").unwrap().as_cli_value(), "Standard");
+    assert!(!defaults.contains_key("text-fill"));
+    assert!(!defaults.contains_key("text-scale"));
+    assert!(!defaults.contains_key("text-spacing"));
+    assert!(!defaults.contains_key("text-block-shadow"));
     assert_eq!(
         defaults.get("text-palette").unwrap().as_cli_value(),
         "cosmic"
@@ -169,19 +148,13 @@ fn text_art_descriptor_has_required_options_and_defaults() {
     );
     assert_eq!(defaults.get("text-bg").unwrap().as_cli_value(), "stars");
     assert_eq!(defaults.get("text-speed").unwrap().as_cli_value(), "1.5");
-    assert_eq!(defaults.get("text-scale").unwrap().as_cli_value(), "1");
     assert_eq!(defaults.get("text-amp").unwrap().as_cli_value(), "2.5");
     assert_eq!(defaults.get("text-freq").unwrap().as_cli_value(), "1");
     assert_eq!(defaults.get("text-glitch").unwrap().as_cli_value(), "0.15");
     assert_eq!(defaults.get("text-bright").unwrap().as_cli_value(), "1");
-    assert_eq!(defaults.get("text-spacing").unwrap().as_cli_value(), "2");
     assert_eq!(defaults.get("text-voffset").unwrap().as_cli_value(), "0");
     assert_eq!(
         defaults.get("text-drop-shadow").unwrap().as_cli_value(),
-        "false"
-    );
-    assert_eq!(
-        defaults.get("text-block-shadow").unwrap().as_cli_value(),
         "false"
     );
     assert_eq!(defaults.get("text-border").unwrap().as_cli_value(), "false");
@@ -195,31 +168,88 @@ fn text_art_descriptor_has_required_options_and_defaults() {
         "false"
     );
     assert_eq!(defaults.get("text-mirror").unwrap().as_cli_value(), "false");
+    assert!(font_choices.windows(2).all(|w| {
+        w[0].to_ascii_lowercase() <= w[1].to_ascii_lowercase()
+    }));
+    assert!(font_choices.contains(&"ANSI Regular".to_string()));
+    assert!(font_choices.contains(&"Block".to_string()));
+    assert!(font_choices.contains(&"DOS Rebel".to_string()));
+    assert!(font_choices.contains(&"Dot Matrix".to_string()));
+    assert!(font_choices.contains(&"Standard".to_string()));
 }
 
 #[test]
-fn text_art_template_fonts_match_supplied_alphabets() {
-    let cases = [
-        ("bold", BOLD_ALPHABET),
-        ("shadow", SHADOW_ALPHABET),
-        ("block", BLOCK_ALPHABET),
-        ("dos", DOS_ALPHABET),
-        ("dot-matrix", DOT_MATRIX_ALPHABET),
-    ];
+fn text_art_standard_figlet_renders_known_output() {
+    let mut options = clean_text_options("OK");
+    options.insert(
+        "text-font".to_string(),
+        OptionValue::Choice("Standard".to_string()),
+    );
+    let expected_figlet = figlet_font_file("Standard")
+        .convert("OK")
+        .unwrap()
+        .to_string();
+    let expected_rows: Vec<String> = expected_figlet
+        .lines()
+        .map(str::trim_end)
+        .map(ToOwned::to_owned)
+        .collect();
+    let width = expected_rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap() as u16;
+    let height = expected_rows.len() as u16;
+    let frame = render_text_frame(&options, width, height);
 
-    for (font, expected) in cases {
-        let mut options = clean_text_options(ALPHABET);
-        options.insert("text-font".to_string(), OptionValue::Choice(font.to_string()));
-        options.insert("text-spacing".to_string(), OptionValue::Int(1));
-        let width = expected.iter().map(|row| row.chars().count()).max().unwrap() as u16;
-        let height = expected.len() as u16;
-        let frame = render_text_frame(&options, width, height);
-        assert_eq!(
-            text_lines(&frame, width, height),
-            expected_lines(expected),
-            "font {font} must match supplied alphabet"
-        );
-    }
+    assert_eq!(text_lines(&frame, width, height), expected_rows);
+}
+
+#[test]
+fn text_art_ansi_shadow_preserves_utf8_glyphs() {
+    let mut options = clean_text_options("A");
+    options.insert(
+        "text-font".to_string(),
+        OptionValue::Choice("ANSI Shadow".to_string()),
+    );
+    options.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("mono".to_string()),
+    );
+    options.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("solid".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+
+    let expected_rows: Vec<String> = utf8_figlet_font_file("ANSI Shadow")
+        .convert("A")
+        .unwrap()
+        .to_string()
+        .lines()
+        .map(str::trim_end)
+        .map(ToOwned::to_owned)
+        .collect();
+    let width = expected_rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap() as u16;
+    let height = expected_rows.len() as u16;
+    let frame = render_text_frame(&options, width, height);
+    let rendered_rows = text_lines(&frame, width, height);
+
+    assert_eq!(rendered_rows, expected_rows);
+    assert!(expected_rows.iter().any(|row| row.contains("█████╗")));
+    assert!(rendered_rows.iter().all(|row| !row.contains('â')));
 }
 
 
@@ -244,54 +274,21 @@ fn text_art_none_effect_keeps_bitmap_static_even_with_motion_options() {
 }
 
 #[test]
-fn text_art_renderer_draws_scaled_bitmap_text() {
-    fn non_space_bounds(frame: &FrameBuffer) -> Option<(u16, u16, u16, u16)> {
-        let mut min_x = u16::MAX;
-        let mut min_y = u16::MAX;
-        let mut max_x = 0;
-        let mut max_y = 0;
-        let mut found = false;
+fn text_art_figlet_size_is_not_scaled() {
+    let mut options = clean_text_options("A");
+    options.insert("text-scale".to_string(), OptionValue::Float(2.0));
 
-        for y in 0..frame.height() {
-            for x in 0..frame.width() {
-                if frame.get(x, y).unwrap().ch == ' ' {
-                    continue;
-                }
-                found = true;
-                min_x = min_x.min(x);
-                min_y = min_y.min(y);
-                max_x = max_x.max(x);
-                max_y = max_y.max(y);
-            }
-        }
+    let err = text_art::renderer(&options, 7).unwrap_err().to_string();
 
-        found.then_some((min_x, min_y, max_x, max_y))
-    }
-
-    let mut scale_one = clean_text_options("A");
-    scale_one.insert(
-        "text-font".to_string(),
-        OptionValue::Choice("block".to_string()),
-    );
-    let frame_one = render_text_frame(&scale_one, 20, 8);
-
-    let mut scale_two = scale_one.clone();
-    scale_two.insert("text-scale".to_string(), OptionValue::Float(2.0));
-    let frame_two = render_text_frame(&scale_two, 30, 12);
-
-    let (min_x1, min_y1, max_x1, max_y1) = non_space_bounds(&frame_one).unwrap();
-    let (min_x2, min_y2, max_x2, max_y2) = non_space_bounds(&frame_two).unwrap();
-
-    assert!(max_x2 - min_x2 > max_x1 - min_x1);
-    assert!(max_y2 - min_y2 > max_y1 - min_y1);
+    assert_eq!(err, "unknown option `text-scale` for preset `text-art`");
 }
 
 #[test]
-fn text_art_block_shadow_is_separate_from_drop_shadow() {
+fn text_art_drop_shadow_does_not_replace_figlet_glyphs() {
     let mut base = clean_text_options("H");
     base.insert(
         "text-font".to_string(),
-        OptionValue::Choice("outline".to_string()),
+        OptionValue::Choice("Standard".to_string()),
     );
 
     let frame_without_shadows = render_text_frame(&base, 15, 9);
@@ -397,7 +394,7 @@ fn text_art_default_clean_hello_has_no_shadow_glyphs_when_background_disabled() 
     let frame = render_text_frame(&options, 50, 12);
 
     assert_eq!(count_char(&frame, '▒'), 0);
-    assert!(count_char(&frame, '█') > 0);
+    assert!(frame.cells().iter().any(|cell| cell.ch != ' '));
 }
 
 #[test]
@@ -455,11 +452,6 @@ fn text_art_slide_overflow_reveals_trailing_characters() {
     let later_frame = render_text_frame_at(&options, 10, 9, 6.2);
 
     assert_ne!(text_lines(&first_frame, 10, 9), text_lines(&later_frame, 10, 9));
-    assert!(
-        (8..10).flat_map(|x| (0..9).map(move |y| (x, y))).any(|(x, y)| {
-            later_frame.get(x, y).unwrap().ch != ' '
-        })
-    );
 }
  
 #[test]

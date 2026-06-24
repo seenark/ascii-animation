@@ -86,29 +86,30 @@ impl Scene {
     }
 
     pub fn load_default_config_if_available() -> Result<Option<Self>> {
+        Self::load_default_config_raw_if_available()?.map(Self::validate).transpose()
+    }
+
+    pub fn load_default_config_raw_if_available() -> Result<Option<Self>> {
         let path = Self::default_config_path();
         let text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(AsciiAnimError::Terminal(source.to_string())),
         };
-        let scene: Self =
-            toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
-                path: path.clone(),
-                source,
-            })?;
-        scene.validate().map(Some)
+        Self::parse_config_text(&path, &text).map(Some)
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|source| AsciiAnimError::Terminal(source.to_string()))?;
-        let scene: Self =
-            toml::from_str(&text).map_err(|source| AsciiAnimError::SceneConfigParse {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        scene.validate()
+        Self::parse_config_text(path, &text)?.validate()
+    }
+
+    fn parse_config_text(path: &Path, text: &str) -> Result<Self> {
+        toml::from_str(text).map_err(|source| AsciiAnimError::SceneConfigParse {
+            path: path.to_path_buf(),
+            source,
+        })
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
@@ -140,11 +141,22 @@ impl Scene {
         }
     }
 
+fn shell_quote_arg(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':' | '='))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
     fn direct_run_export_command(&self) -> String {
         let instance = &self.instances[0];
         let mut command = format!("ascii-animation run {}", instance.preset);
         for (name, value) in &instance.options {
-            command.push_str(&format!(" --{} {}", name, value.as_cli_value()));
+            command.push_str(&format!(" --{} {}", name, Self::shell_quote_arg(&value.as_cli_value())));
         }
         if !self.color {
             command.push_str(" --no-color");

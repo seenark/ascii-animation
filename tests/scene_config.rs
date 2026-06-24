@@ -116,6 +116,24 @@ fn single_text_art_instance_exports_full_command() {
 }
 
 #[test]
+fn single_text_art_instance_exports_figlet_font_with_spaces() {
+    let mut instance = text_art_instance("text-art-1");
+    instance.options.insert(
+        "text-font".to_string(),
+        OptionValue::Choice("ANSI Regular".to_string()),
+    );
+    let scene = Scene {
+        frame_rate: 30,
+        color: true,
+        instances: vec![instance],
+    };
+    assert_eq!(
+        scene.export_command(),
+        "ascii-animation run text-art --text OK --text-bg none --text-font 'ANSI Regular'"
+    );
+}
+
+#[test]
 fn single_instance_with_non_default_frame_rate_exports_config_command() {
     let scene = Scene {
         frame_rate: 24,
@@ -267,6 +285,57 @@ fn tui_state_treats_normalized_startup_scene_as_fresh_export() {
 
     assert_eq!(state.export_status(), None);
     assert_ne!(state.scene.instances[0].options, scene.instances[0].options);
+}
+
+#[test]
+fn tui_state_loads_text_art_scene_with_removed_legacy_options() {
+    let _home_lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let path = home.join(".config/ascii-animation/scene.toml");
+    let mut instance = text_art_instance("saved-text-art");
+    instance.options.insert(
+        "text-font".to_string(),
+        OptionValue::Choice("block".to_string()),
+    );
+    instance.options.insert(
+        "text-fill".to_string(),
+        OptionValue::Choice("auto".to_string()),
+    );
+    instance.options.insert("text-scale".to_string(), OptionValue::Float(1.0));
+    instance.options.insert("text-spacing".to_string(), OptionValue::Int(2));
+    instance.options.insert(
+        "text-block-shadow".to_string(),
+        OptionValue::Bool(false),
+    );
+    let scene = Scene {
+        frame_rate: 30,
+        color: true,
+        instances: vec![instance],
+    };
+    write_scene(&scene, &path);
+
+    let original_home = env::var_os("HOME");
+    env::set_var("HOME", home);
+
+    let registry = build_default_registry();
+    let state = TuiState::load_startup(&registry).unwrap();
+
+    match original_home {
+        Some(value) => env::set_var("HOME", value),
+        None => env::remove_var("HOME"),
+    }
+
+    assert_eq!(state.scene.instances[0].id, "saved-text-art");
+    assert_eq!(
+        state.scene.instances[0].options.get("text-font").unwrap(),
+        &OptionValue::Choice("Standard".to_string())
+    );
+    assert!(!state.scene.instances[0].options.contains_key("text-fill"));
+    assert!(!state.scene.instances[0].options.contains_key("text-scale"));
+    assert!(!state.scene.instances[0].options.contains_key("text-spacing"));
+    assert!(!state.scene.instances[0].options.contains_key("text-block-shadow"));
+    assert_eq!(state.export_status(), None);
 }
 
 #[test]

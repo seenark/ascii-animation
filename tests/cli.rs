@@ -361,9 +361,7 @@ fn parses_direct_text_art_command() {
         "--text",
         "CODE",
         "--text-font",
-        "dot-matrix",
-        "--text-fill",
-        "triangle",
+        "Dot Matrix",
         "--text-palette",
         "plasma",
         "--text-effect",
@@ -374,12 +372,8 @@ fn parses_direct_text_art_command() {
         "slide",
         "--text-speed",
         "2.5",
-        "--text-scale",
-        "1.2",
         "--text-drop-shadow",
         "false",
-        "--text-block-shadow",
-        "true",
         "--no-color",
     ]);
     let registry = build_default_registry();
@@ -402,15 +396,7 @@ fn parses_direct_text_art_command() {
             .get("text-font")
             .unwrap()
             .as_cli_value(),
-        "dot-matrix"
-    );
-    assert_eq!(
-        scene.instances[0]
-            .options
-            .get("text-fill")
-            .unwrap()
-            .as_cli_value(),
-        "triangle"
+        "Dot Matrix"
     );
     assert_eq!(
         scene.instances[0]
@@ -455,31 +441,15 @@ fn parses_direct_text_art_command() {
     assert_eq!(
         scene.instances[0]
             .options
-            .get("text-scale")
-            .unwrap()
-            .as_cli_value(),
-        "1.2"
-    );
-    assert_eq!(
-        scene.instances[0]
-            .options
             .get("text-drop-shadow")
             .unwrap()
             .as_cli_value(),
         "false"
     );
-    assert_eq!(
-        scene.instances[0]
-            .options
-            .get("text-block-shadow")
-            .unwrap()
-            .as_cli_value(),
-        "true"
-    );
 }
 
 #[test]
-fn parses_dos_text_art_font_choice() {
+fn parses_dos_rebel_text_art_font_choice() {
     let args = parse_run([
         "ascii-animation",
         "run",
@@ -487,7 +457,7 @@ fn parses_dos_text_art_font_choice() {
         "--text",
         "OK",
         "--text-font",
-        "dos",
+        "DOS Rebel",
         "--text-effect",
         "none",
         "--text-bg",
@@ -503,8 +473,37 @@ fn parses_dos_text_art_font_choice() {
             .get("text-font")
             .unwrap()
             .as_cli_value(),
-        "dos"
+        "DOS Rebel"
     );
+}
+
+#[test]
+fn rejects_legacy_text_art_font_choice_alias() {
+    let err = parse_run_args_from(
+        [
+            "ascii-animation",
+            "run",
+            "text-art",
+            "--text",
+            "OK",
+            "--text-font",
+            "dot-matrix",
+            "--text-effect",
+            "none",
+            "--text-bg",
+            "none",
+            "--no-color",
+        ],
+        &build_default_registry(),
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.contains("invalid value 'dot-matrix' for '--text-font <text-font>'"),
+        "unexpected error: {err}"
+    );
+    assert!(err.contains("Dot Matrix"), "unexpected error: {err}");
 }
 
 #[test]
@@ -559,7 +558,6 @@ fn render_centered_scene_frame_extends_text_art_canvas_for_extend_overflow() {
     options.insert("text-amp".to_string(), OptionValue::Float(0.0));
     options.insert("text-glow".to_string(), OptionValue::Bool(false));
     options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
-    options.insert("text-block-shadow".to_string(), OptionValue::Bool(false));
     let options = registry
         .get("text-art")
         .unwrap()
