@@ -1,0 +1,10 @@
+/Volumes/HadesGodBlue/CodeSook/ascii-animation/target/debug/deps/console-9b629067aaf3ef5c.d: /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/lib.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/common_term.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/kb.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/term.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/unix_term.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/utils.rs
+
+/Volumes/HadesGodBlue/CodeSook/ascii-animation/target/debug/deps/libconsole-9b629067aaf3ef5c.rmeta: /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/lib.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/common_term.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/kb.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/term.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/unix_term.rs /Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/utils.rs
+
+/Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/lib.rs:
+/Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/common_term.rs:
+/Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/kb.rs:
+/Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/term.rs:
+/Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/unix_term.rs:
+/Users/atiwatseenark/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/console-0.16.3/src/utils.rs:

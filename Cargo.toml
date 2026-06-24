@@ -10,6 +10,7 @@ arboard = "3.6.1"
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.28"
 directories = "5.0"
+figlet-rs = "1"
 rand = "0.8"
 ratatui = "0.28"
 serde = { version = "1.0", features = ["derive"] }

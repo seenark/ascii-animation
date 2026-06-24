@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
+use std::sync::OnceLock;
 
+use figlet_rs::FIGlet;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
 use crate::presets::{OptionDescriptor, OptionValue, PresetDescriptor};
 use crate::render::{AnimationRenderer, Cell, FrameBuffer, RenderContext, Rgb};
 use crate::{AsciiAnimError, Result};
+
+#[path = "text_art_fonts.rs"]
+mod text_art_fonts;
 
 const PRESET_NAME: &str = "text-art";
 const TEXT_MAX_LEN: usize = 64;
@@ -17,6 +22,7 @@ const RAIN_TAIL_GLYPHS: [char; 6] = ['│', '·', ':', ';', '|', 'ー'];
 const NOISE_GLYPHS: [char; 4] = ['·', ',', '.', '`'];
 const PARTICLE_GLYPHS: [char; 6] = ['*', '·', '+', '✦', '★', '◆'];
 const TYPEWRITER_BLINK: [char; 2] = ['_', ' '];
+const TEMPLATE_ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 const FONT5: &[(char, [&str; 7])] = &[
     ('A', ["01110", "10001", "10001", "11111", "10001", "10001", "10001"]),
@@ -155,6 +161,12 @@ const PALETTE_CANDY: [Rgb; 7] = [
     Rgb::new(255, 255, 255),
 ];
 
+static BOLD_FIGLET: OnceLock<FIGlet> = OnceLock::new();
+static SHADOW_FIGLET: OnceLock<FIGlet> = OnceLock::new();
+static BLOCK_FIGLET: OnceLock<FIGlet> = OnceLock::new();
+static DOS_FIGLET: OnceLock<FIGlet> = OnceLock::new();
+static DOT_MATRIX_FIGLET: OnceLock<FIGlet> = OnceLock::new();
+
 #[derive(Debug, Clone)]
 struct TextArtOptions {
     text: String,
@@ -248,7 +260,7 @@ pub fn descriptor() -> PresetDescriptor {
     PresetDescriptor::new(
         PRESET_NAME,
         "ASCII Text Art",
-        "Animated 5x7 ASCII text art with fonts, palettes, effects, and backgrounds",
+        "ASCII text art with fonts, palettes, effects, and backgrounds",
         vec![
             OptionDescriptor::text("text", "Text", "HELLO", TEXT_MAX_LEN, true),
             OptionDescriptor::choice(
@@ -263,7 +275,16 @@ pub fn descriptor() -> PresetDescriptor {
                 "Font",
                 "block",
                 vec![
-                    "block", "bold", "shadow", "outline", "thin", "double", "bubble", "cyber",
+                    "block",
+                    "bold",
+                    "shadow",
+                    "dos",
+                    "dot-matrix",
+                    "outline",
+                    "thin",
+                    "double",
+                    "bubble",
+                    "cyber",
                 ],
                 true,
             ),
@@ -290,8 +311,9 @@ pub fn descriptor() -> PresetDescriptor {
             OptionDescriptor::choice(
                 "text-effect",
                 "Effect",
-                "wave",
+                "none",
                 vec![
+                    "none",
                     "wave",
                     "pulse",
                     "glitch",
@@ -475,7 +497,7 @@ impl AnimationRenderer for TextArtRenderer {
                                 '▒',
                                 Some(Rgb::new(17, 17, 51)),
                                 context.layer,
-                                context.z_index,
+                                context.z_index.saturating_sub(1),
                                 context.order,
                             ),
                         );
@@ -537,7 +559,16 @@ impl TextArtOptions {
                 values,
                 "text-font",
                 &[
-                    "block", "bold", "shadow", "outline", "thin", "double", "bubble", "cyber",
+                    "block",
+                    "bold",
+                    "shadow",
+                    "dos",
+                    "dot-matrix",
+                    "outline",
+                    "thin",
+                    "double",
+                    "bubble",
+                    "cyber",
                 ],
             )?,
             fill: get_choice(
@@ -560,6 +591,7 @@ impl TextArtOptions {
                 values,
                 "text-effect",
                 &[
+                    "none",
                     "wave",
                     "pulse",
                     "glitch",
@@ -629,7 +661,177 @@ impl TextBitmap {
     }
 }
 
+fn figlet_font(font: &str) -> Option<&'static FIGlet> {
+    match font {
+        "bold" => Some(BOLD_FIGLET.get_or_init(|| {
+            FIGlet::from_content(text_art_fonts::ANSI_REGULAR_FLF)
+                .expect("embedded ansi_regular FIGlet font must parse")
+        })),
+        "shadow" => Some(SHADOW_FIGLET.get_or_init(|| {
+            FIGlet::from_content(text_art_fonts::ANSI_SHADOW_FLF)
+                .expect("embedded ansi_shadow FIGlet font must parse")
+        })),
+        "block" => Some(BLOCK_FIGLET.get_or_init(|| {
+            FIGlet::from_content(text_art_fonts::SMBLOCK_TLF)
+                .expect("embedded smblock FIGlet font must parse")
+        })),
+        "dos" => Some(DOS_FIGLET.get_or_init(|| {
+            FIGlet::from_content(text_art_fonts::DOS_REBEL_FLF)
+                .expect("embedded dos_rebel FIGlet font must parse")
+        })),
+        "dot-matrix" => Some(DOT_MATRIX_FIGLET.get_or_init(|| {
+            FIGlet::from_content(text_art_fonts::DOTMATRIX_FLF)
+                .expect("embedded dotmatrix FIGlet font must parse")
+        })),
+        _ => None,
+    }
+}
+
+fn template_font_rows(font: &str) -> Option<&'static [&'static str]> {
+    match font {
+        "block" => Some(text_art_fonts::BLOCK_TEMPLATE_ROWS),
+        _ => None,
+    }
+}
+
+fn template_rows_map(font: &str) -> Option<BTreeMap<char, Vec<Vec<char>>>> {
+    let rows = template_font_rows(font)?;
+    let mut padded_rows: Vec<Vec<char>> = rows.iter().map(|row| row.chars().collect()).collect();
+    let width = padded_rows.iter().map(Vec::len).max().unwrap_or(0);
+    for row in &mut padded_rows {
+        row.resize(width, ' ');
+    }
+
+    let glyph_widths: &[usize] = match font {
+        "block" => &[
+            6, 6, 6, 6, 6, 6, 6, 6, 2, 5, 6, 6, 8, 7, 6, 6, 7, 7, 6, 6, 6, 6, 9, 6, 6, 6,
+        ],
+        _ => return None,
+    };
+
+    let mut map = BTreeMap::new();
+    let mut offset = 0usize;
+    for (ch, glyph_width) in TEMPLATE_ALPHABET.chars().zip(glyph_widths.iter().copied()) {
+        let glyph_rows = padded_rows
+            .iter()
+            .map(|row| row[offset..offset + glyph_width].to_vec())
+            .collect();
+        map.insert(ch, glyph_rows);
+        offset += glyph_width + 1;
+    }
+    map.insert(' ', vec![vec![' '; 4]; rows.len()]);
+    Some(map)
+}
+
+fn figlet_rows(font: &FIGlet, text: &str) -> Option<Vec<Vec<char>>> {
+    let figure = font.convert(&text.to_ascii_uppercase())?;
+    let mut rows: Vec<Vec<char>> = figure
+        .to_string()
+        .lines()
+        .map(|line| line.trim_end().chars().collect())
+        .collect();
+    while rows.last().is_some_and(|row| row.is_empty()) {
+        rows.pop();
+    }
+    Some(rows)
+}
+
+fn exact_template_rows(font: &str, text: &str) -> Option<Vec<Vec<char>>> {
+    if font == "block" && text.to_ascii_uppercase() == TEMPLATE_ALPHABET {
+        return Some(
+            text_art_fonts::BLOCK_TEMPLATE_ROWS
+                .iter()
+                .map(|row| row.chars().collect())
+                .collect(),
+        );
+    }
+    None
+}
+
+fn compose_template_rows(
+    text: &str,
+    template_map: &BTreeMap<char, Vec<Vec<char>>>,
+    template_height: usize,
+) -> Vec<Vec<char>> {
+    let glyphs: Vec<Vec<Vec<char>>> = text
+        .chars()
+        .map(|ch| {
+            template_map
+                .get(&ch.to_ascii_uppercase())
+                .cloned()
+                .unwrap_or_else(|| vec![vec![' '; 4]; template_height])
+        })
+        .collect();
+    if glyphs.is_empty() {
+        return vec![vec![' ']; template_height.max(1)];
+    }
+
+    let mut composed = glyphs[0].clone();
+    for glyph in glyphs.into_iter().skip(1) {
+        let max_overlap = composed
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0)
+            .min(glyph.iter().map(Vec::len).max().unwrap_or(0));
+        let mut overlap = 0usize;
+        for candidate in 1..=max_overlap {
+            let mut can_overlap = true;
+            for row_index in 0..template_height {
+                let left_row = &composed[row_index];
+                let right_row = &glyph[row_index];
+                for offset in 0..candidate {
+                    let left = left_row[left_row.len() - candidate + offset];
+                    let right = right_row[offset];
+                    if left != ' ' && right != ' ' {
+                        can_overlap = false;
+                        break;
+                    }
+                }
+                if !can_overlap {
+                    break;
+                }
+            }
+            if can_overlap {
+                overlap = candidate;
+            } else {
+                break;
+            }
+        }
+
+        for row_index in 0..template_height {
+            let left_row = &mut composed[row_index];
+            let right_row = &glyph[row_index];
+            let overlap_start = left_row.len().saturating_sub(overlap);
+            for offset in 0..overlap {
+                let right = right_row[offset];
+                if right != ' ' {
+                    left_row[overlap_start + offset] = right;
+                }
+            }
+            left_row.extend(right_row[overlap..].iter().copied());
+        }
+    }
+
+    composed
+}
+
 fn text_bitmap_width(options: &TextArtOptions) -> usize {
+    if let Some(rows) = exact_template_rows(&options.font, &options.text) {
+        return rows.iter().map(|row| row.len()).max().unwrap_or(1).max(1);
+    }
+    if let Some(template_map) = template_rows_map(&options.font) {
+        let template_height = template_font_rows(&options.font).unwrap().len().max(1);
+        let rows = compose_template_rows(&options.text, &template_map, template_height);
+        return rows.iter().map(|row| row.len()).max().unwrap_or(1).max(1);
+    }
+
+    if let Some(font) = figlet_font(&options.font) {
+        return figlet_rows(font, &options.text)
+            .map(|rows| rows.iter().map(|row| row.len()).max().unwrap_or(1).max(1))
+            .unwrap_or(1);
+    }
+
     let text_len = options.text.chars().count();
     if text_len == 0 {
         return 5;
@@ -645,6 +847,16 @@ fn scaled_text_width(options: &TextArtOptions) -> u16 {
 }
 
 fn build_text_bitmap(options: &TextArtOptions) -> TextBitmap {
+    if let Some(template_map) = template_rows_map(&options.font) {
+        build_template_text_bitmap(options, &template_map)
+    } else if let Some(font) = figlet_font(&options.font) {
+        build_figlet_text_bitmap(options, font)
+    } else {
+        build_legacy_text_bitmap(options)
+    }
+}
+
+fn build_legacy_text_bitmap(options: &TextArtOptions) -> TextBitmap {
     let text: Vec<char> = options.text.chars().map(normalize_char).collect();
     if text.is_empty() {
         return TextBitmap::blank(5, 7);
@@ -695,22 +907,134 @@ fn build_text_bitmap(options: &TextArtOptions) -> TextBitmap {
     }
 
     if min_x <= max_x && min_y <= max_y {
-        let x_span = max_x.saturating_sub(min_x).max(1) as f64;
-        let y_span = max_y.saturating_sub(min_y).max(1) as f64;
-        let width = bitmap.width;
-        for (index, cell) in bitmap.cells.iter_mut().enumerate() {
-            let Some(cell) = cell.as_mut() else {
-                continue;
-            };
-            let x = index % width;
-            let y = index / width;
-            cell.gradient_x = (x.saturating_sub(min_x)) as f64 / x_span;
-            cell.gradient_y = (y.saturating_sub(min_y)) as f64 / y_span;
-        }
+        normalize_bitmap_gradients(&mut bitmap, min_x, max_x, min_y, max_y);
     }
 
     bitmap
 }
+
+fn build_template_text_bitmap(
+    options: &TextArtOptions,
+    template_map: &BTreeMap<char, Vec<Vec<char>>>,
+) -> TextBitmap {
+    let template_height = template_font_rows(&options.font).unwrap().len().max(1);
+    let rows = exact_template_rows(&options.font, &options.text)
+        .unwrap_or_else(|| compose_template_rows(&options.text, template_map, template_height));
+    let height = rows.len().max(1);
+    let width = rows.iter().map(|row| row.len()).max().unwrap_or(1).max(1);
+    let mut bitmap = TextBitmap::blank(width, height);
+    bitmap.visible_chars = options
+        .text
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .count()
+        .max(1);
+    let mut min_x = bitmap.width;
+    let mut max_x = 0usize;
+    let mut min_y = bitmap.height;
+    let mut max_y = 0usize;
+
+    for (row_index, row) in rows.iter().enumerate() {
+        for (col_index, ch) in row.iter().enumerate() {
+            if *ch == ' ' {
+                continue;
+            }
+            min_x = min_x.min(col_index);
+            max_x = max_x.max(col_index);
+            min_y = min_y.min(row_index);
+            max_y = max_y.max(row_index);
+            bitmap.set(
+                col_index,
+                row_index,
+                BitmapCell {
+                    ch: *ch,
+                    char_index: 0,
+                    rel_x: col_index as f64 / (width.saturating_sub(1).max(1) as f64),
+                    rel_y: row_index as f64 / (height.saturating_sub(1).max(1) as f64),
+                    gradient_x: 0.0,
+                    gradient_y: 0.0,
+                },
+            );
+        }
+    }
+
+    if min_x <= max_x && min_y <= max_y {
+        normalize_bitmap_gradients(&mut bitmap, min_x, max_x, min_y, max_y);
+    }
+
+    bitmap
+}
+
+fn build_figlet_text_bitmap(options: &TextArtOptions, font: &FIGlet) -> TextBitmap {
+    let Some(rows) = figlet_rows(font, &options.text) else {
+        return TextBitmap::blank(1, 1);
+    };
+    let height = rows.len().max(1);
+    let width = rows.iter().map(|row| row.len()).max().unwrap_or(1).max(1);
+    let mut bitmap = TextBitmap::blank(width, height);
+    bitmap.visible_chars = options
+        .text
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .count()
+        .max(1);
+    let mut min_x = bitmap.width;
+    let mut max_x = 0usize;
+    let mut min_y = bitmap.height;
+    let mut max_y = 0usize;
+
+    for (row_index, row) in rows.iter().enumerate() {
+        for (col_index, ch) in row.iter().enumerate() {
+            if *ch == ' ' {
+                continue;
+            }
+            min_x = min_x.min(col_index);
+            max_x = max_x.max(col_index);
+            min_y = min_y.min(row_index);
+            max_y = max_y.max(row_index);
+            bitmap.set(
+                col_index,
+                row_index,
+                BitmapCell {
+                    ch: *ch,
+                    char_index: 0,
+                    rel_x: col_index as f64 / (width.saturating_sub(1).max(1) as f64),
+                    rel_y: row_index as f64 / (height.saturating_sub(1).max(1) as f64),
+                    gradient_x: 0.0,
+                    gradient_y: 0.0,
+                },
+            );
+        }
+    }
+
+    if min_x <= max_x && min_y <= max_y {
+        normalize_bitmap_gradients(&mut bitmap, min_x, max_x, min_y, max_y);
+    }
+
+    bitmap
+}
+
+fn normalize_bitmap_gradients(
+    bitmap: &mut TextBitmap,
+    min_x: usize,
+    max_x: usize,
+    min_y: usize,
+    max_y: usize,
+) {
+    let x_span = max_x.saturating_sub(min_x).max(1) as f64;
+    let y_span = max_y.saturating_sub(min_y).max(1) as f64;
+    let width = bitmap.width;
+    for (index, cell) in bitmap.cells.iter_mut().enumerate() {
+        let Some(cell) = cell.as_mut() else {
+            continue;
+        };
+        let x = index % width;
+        let y = index / width;
+        cell.gradient_x = (x.saturating_sub(min_x)) as f64 / x_span;
+        cell.gradient_y = (y.saturating_sub(min_y)) as f64 / y_span;
+    }
+}
+
 
 fn text_origin_x(
     context_width: u16,
@@ -742,22 +1066,17 @@ fn apply_font_style(
 ) -> [[char; 5]; 7] {
     let mut out = [[' '; 5]; 7];
     match font {
-        "block" | "bold" => {
-            fill_pixels(pixels, &mut out, fill);
-            if block_shadow {
-                apply_block_shadow(pixels, &mut out);
-            }
-        }
-        "shadow" => {
-            fill_pixels(pixels, &mut out, fill);
-            apply_block_shadow(pixels, &mut out);
-        }
         "outline" => outline_pixels(pixels, &mut out, ['┌', '┐', '└', '┘', '─', '│', '·']),
         "thin" => outline_pixels(pixels, &mut out, ['╭', '╮', '╰', '╯', '─', '│', ' ']),
         "double" => outline_pixels(pixels, &mut out, ['╔', '╗', '╚', '╝', '═', '║', '·']),
         "cyber" => outline_pixels(pixels, &mut out, ['◤', '◥', '◣', '◢', '━', '┃', '▸']),
         "bubble" => bubble_pixels(pixels, &mut out),
-        _ => fill_pixels(pixels, &mut out, fill),
+        _ => {
+            fill_pixels(pixels, &mut out, fill);
+            if block_shadow {
+                apply_block_shadow(pixels, &mut out);
+            }
+        }
     }
     out
 }

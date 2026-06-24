@@ -361,7 +361,7 @@ fn parses_direct_text_art_command() {
         "--text",
         "CODE",
         "--text-font",
-        "cyber",
+        "dot-matrix",
         "--text-fill",
         "triangle",
         "--text-palette",
@@ -402,7 +402,7 @@ fn parses_direct_text_art_command() {
             .get("text-font")
             .unwrap()
             .as_cli_value(),
-        "cyber"
+        "dot-matrix"
     );
     assert_eq!(
         scene.instances[0]
@@ -475,6 +475,35 @@ fn parses_direct_text_art_command() {
             .unwrap()
             .as_cli_value(),
         "true"
+    );
+}
+
+#[test]
+fn parses_dos_text_art_font_choice() {
+    let args = parse_run([
+        "ascii-animation",
+        "run",
+        "text-art",
+        "--text",
+        "OK",
+        "--text-font",
+        "dos",
+        "--text-effect",
+        "none",
+        "--text-bg",
+        "none",
+        "--no-color",
+    ]);
+    let registry = build_default_registry();
+    let scene = scene_from_run_args(&args, &registry).unwrap();
+
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-font")
+            .unwrap()
+            .as_cli_value(),
+        "dos"
     );
 }
 
@@ -830,9 +859,7 @@ fn direct_text_art_scene_renders_non_empty_frame() {
         "--text-bg",
         "none",
         "--text-effect",
-        "wave",
-        "--text-amp",
-        "0",
+        "none",
         "--no-color",
     ]);
     let registry = build_default_registry();
