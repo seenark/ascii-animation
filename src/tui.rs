@@ -29,6 +29,7 @@ pub struct TuiState {
     custom_placements: Vec<Placement>,
     last_exported_scene: RefCell<Option<Scene>>,
     last_copy_status: Option<String>,
+    editing_text: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +71,7 @@ impl TuiState {
             custom_placements: Vec::new(),
             last_exported_scene: RefCell::new(None),
             last_copy_status: None,
+            editing_text: false,
         };
         state.add_instance("galaxy", registry)?;
         Ok(state)
@@ -109,6 +111,7 @@ impl TuiState {
             selected_option: 0,
             option_names: Vec::new(),
             option_kinds: Vec::new(),
+            editing_text: false,
         };
         state.sync_selected_options(registry)?;
         *state.last_exported_scene.borrow_mut() = Some(state.scene.clone());
@@ -140,6 +143,10 @@ impl TuiState {
 
     pub fn copy_status(&self) -> Option<&str> {
         self.last_copy_status.as_deref()
+    }
+
+    pub fn editing_text(&self) -> bool {
+        self.editing_text
     }
 
     pub fn set_copy_status(&mut self, result: std::result::Result<(), String>) {
@@ -196,6 +203,7 @@ impl TuiState {
         self.scene.instances.remove(self.selected_instance);
         self.custom_placements.remove(self.selected_instance);
         self.selected_instance = self.selected_instance.min(self.scene.instances.len() - 1);
+        self.editing_text = false;
         self.sync_selected_options(registry)
     }
 
@@ -206,6 +214,7 @@ impl TuiState {
 
         let len = self.scene.instances.len() as i32;
         self.selected_instance = (self.selected_instance as i32 + delta).rem_euclid(len) as usize;
+        self.editing_text = false;
         self.sync_selected_options(registry)
     }
 
@@ -232,6 +241,7 @@ impl TuiState {
         instance.id = next_id;
         instance.preset = next_preset.to_string();
         instance.options = descriptor.defaults();
+        self.editing_text = false;
         self.sync_selected_options(registry)
     }
 
@@ -306,12 +316,82 @@ impl TuiState {
         Ok(())
     }
 
+    pub fn selected_option_is_text(&self) -> bool {
+        matches!(
+            self.option_kinds.get(self.selected_option),
+            Some(OptionKind::Text { .. })
+        )
+    }
+
+    pub fn begin_text_edit(&mut self) {
+        if self.selected_option_is_text() {
+            self.editing_text = true;
+        }
+    }
+
+    pub fn end_text_edit(&mut self) {
+        self.editing_text = false;
+    }
+
+    pub fn push_selected_text_char(&mut self, ch: char) -> Result<()> {
+        let option_name = self
+            .option_names
+            .get(self.selected_option)
+            .cloned()
+            .ok_or_else(|| AsciiAnimError::UnknownOption {
+                preset: self.selected_instance().preset.clone(),
+                option: String::new(),
+            })?;
+        let max_len = match self.option_kinds.get(self.selected_option) {
+            Some(OptionKind::Text { max_len }) => *max_len,
+            _ => return Ok(()),
+        };
+        if !(ch.is_ascii_graphic() || ch == ' ') {
+            return Ok(());
+        }
+        let instance = self.selected_instance_mut();
+        let Some(OptionValue::Text(value)) = instance.options.get_mut(&option_name) else {
+            return Ok(());
+        };
+        if value.chars().count() >= max_len {
+            return Ok(());
+        }
+        value.push(ch);
+        Ok(())
+    }
+
+    pub fn pop_selected_text_char(&mut self) -> Result<()> {
+        let option_name = self
+            .option_names
+            .get(self.selected_option)
+            .cloned()
+            .ok_or_else(|| AsciiAnimError::UnknownOption {
+                preset: self.selected_instance().preset.clone(),
+                option: String::new(),
+            })?;
+        if !matches!(
+            self.option_kinds.get(self.selected_option),
+            Some(OptionKind::Text { .. })
+        ) {
+            return Ok(());
+        }
+        let instance = self.selected_instance_mut();
+        let Some(OptionValue::Text(value)) = instance.options.get_mut(&option_name) else {
+            return Ok(());
+        };
+        value.pop();
+        Ok(())
+    }
+
     pub fn next_option(&mut self) {
         if self.option_names.is_empty() {
             return;
         }
 
         self.selected_option = (self.selected_option + 1) % self.option_names.len();
+        if !self.selected_option_is_text() {
+            self.editing_text = false;
+        }
     }
 
     pub fn previous_option(&mut self) {
@@ -324,6 +404,9 @@ impl TuiState {
         } else {
             self.selected_option - 1
         };
+        if !self.selected_option_is_text() {
+            self.editing_text = false;
+        }
     }
 
     pub fn adjust_selected_option(&mut self, delta: i32) -> Result<()> {
@@ -399,6 +482,9 @@ impl TuiState {
         self.selected_option = self
             .selected_option
             .min(self.option_names.len().saturating_sub(1));
+        if !self.selected_option_is_text() {
+            self.editing_text = false;
+        }
         Ok(())
     }
 }
@@ -441,7 +527,31 @@ pub fn handle_tui_key(
     key: KeyEvent,
     registry: &PresetRegistry,
 ) -> Result<TuiAction> {
+    if state.editing_text() {
+        match key.code {
+            KeyCode::Enter | KeyCode::Esc => {
+                state.end_text_edit();
+                return Ok(TuiAction::Continue);
+            }
+            KeyCode::Backspace => {
+                state.pop_selected_text_char()?;
+                return Ok(TuiAction::Continue);
+            }
+            KeyCode::Char(ch)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                state.push_selected_text_char(ch)?;
+                return Ok(TuiAction::Continue);
+            }
+            _ => return Ok(TuiAction::Continue),
+        }
+    }
+
     match key.code {
+        KeyCode::Enter if state.selected_option_is_text() => {
+            state.begin_text_edit();
+            Ok(TuiAction::Continue)
+        }
         KeyCode::Char('q') | KeyCode::Esc => Ok(TuiAction::Quit),
         KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
             Ok(TuiAction::CopyCommand(state.export_command()))
@@ -546,7 +656,9 @@ fn run_loop(
 
                 let instance = state.selected_instance();
                 let mut lines = vec![
-                    Line::from("Controls: Tab/Shift-Tab instance, ↑/↓ option, ←/→ adjust"),
+                    Line::from(
+                        "Controls: Tab/Shift-Tab instance, ↑/↓ option, ←/→ adjust, Enter edit text",
+                    ),
                     Line::from("a add, d delete, p/P preset, m/M placement, l/L layer, [/ ] z"),
                     Line::from("s save, c copy command, q quit"),
                     Line::from(""),
@@ -581,7 +693,13 @@ fn run_loop(
                 lines.push(Line::from("Options:"));
                 for (index, name) in state.option_names.iter().enumerate() {
                     let marker = if index == state.selected_option {
-                        ">"
+                        if state.editing_text()
+                            && matches!(state.option_kinds[index], OptionKind::Text { .. })
+                        {
+                            "*"
+                        } else {
+                            ">"
+                        }
                     } else {
                         " "
                     };

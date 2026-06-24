@@ -88,6 +88,7 @@ fn descriptor_arg(option: &OptionDescriptor) -> Arg {
                 .map(|choice| leaked(choice))
                 .collect::<Vec<_>>(),
         )),
+        OptionKind::Text { .. } => arg.value_parser(value_parser!(String)),
     }
 }
 
@@ -156,6 +157,7 @@ fn descriptor_value_from_matches(
             .get_one::<bool>(option.name())
             .map(ToString::to_string),
         OptionKind::Choice { .. } => matches.get_one::<String>(option.name()).cloned(),
+        OptionKind::Text { .. } => matches.get_one::<String>(option.name()).cloned(),
     }
 }
 
@@ -322,6 +324,7 @@ fn parse_descriptor_value(kind: &OptionKind, name: &str, raw: &str) -> Result<Op
             }
         }),
         OptionKind::Choice { .. } => Ok(OptionValue::Choice(raw.to_string())),
+        OptionKind::Text { .. } => Ok(OptionValue::Text(raw.to_string())),
     }
 }
 

@@ -33,6 +33,13 @@ pub enum AsciiAnimError {
         actual: String,
     },
 
+    #[error("option `{option}` is too long: expected at most {max} characters, got {actual}")]
+    TextTooLong {
+        option: String,
+        max: usize,
+        actual: usize,
+    },
+
     #[error("cannot combine {input_source} with direct preset inputs: {conflicts}")]
     ConflictingRunInputs {
         input_source: &'static str,

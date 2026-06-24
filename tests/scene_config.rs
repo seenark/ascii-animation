@@ -33,6 +33,40 @@ fn galaxy_instance(id: &str) -> AnimationInstance {
     }
 }
 
+fn text_art_instance(id: &str) -> AnimationInstance {
+    let mut options = BTreeMap::new();
+    options.insert("text".to_string(), OptionValue::Text("OK".to_string()));
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+
+    AnimationInstance {
+        id: id.to_string(),
+        preset: "text-art".to_string(),
+        options,
+        placement: Placement::Center,
+        layer: Layer::Normal,
+        z_index: 0,
+        enabled: true,
+    }
+}
+
+fn text_edit_registry() -> ascii_animation::presets::PresetRegistry {
+    ascii_animation::presets::PresetRegistry::new(vec![
+        ascii_animation::presets::galaxy::descriptor(),
+        ascii_animation::presets::PresetDescriptor::new(
+            "demo",
+            "Demo",
+            "Text editing demo",
+            vec![ascii_animation::presets::OptionDescriptor::text(
+                "message", "Message", "HELLO", 12, true,
+            )],
+            |_options, _seed| unreachable!("text editing test does not render"),
+        ),
+    ])
+}
+
 fn write_scene(scene: &Scene, path: &Path) {
     scene.save_to_path(path).unwrap();
 }
@@ -64,6 +98,20 @@ fn single_instance_exports_full_command() {
     assert_eq!(
         scene.export_command(),
         "ascii-animation run galaxy --arms 3 --palette cosmic"
+    );
+}
+
+#[test]
+fn single_text_art_instance_exports_full_command() {
+    let scene = Scene {
+        frame_rate: 30,
+        color: true,
+        instances: vec![text_art_instance("text-art-1")],
+    };
+
+    assert_eq!(
+        scene.export_command(),
+        "ascii-animation run text-art --text OK --text-bg none"
     );
 }
 
@@ -380,6 +428,22 @@ fn load_from_path_rejects_unknown_preset() {
 }
 
 #[test]
+fn load_from_path_accepts_text_art_scene() {
+    let scene = Scene {
+        frame_rate: 30,
+        color: true,
+        instances: vec![text_art_instance("text-art-1")],
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("text-art.toml");
+    write_scene(&scene, &path);
+
+    let loaded = Scene::load_from_path(&path).unwrap();
+
+    assert_eq!(loaded.instances[0].preset, "text-art");
+}
+
+#[test]
 fn load_from_path_rejects_unknown_option_key() {
     let mut instance = galaxy_instance("galaxy-1");
     instance
@@ -488,6 +552,85 @@ fn tui_copy_hotkey_returns_whole_export_command() {
 }
 
 #[test]
+fn tui_state_cycles_to_text_art_and_exposes_text_option() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+
+    for _ in 0..2 {
+        if state.selected_instance().preset == "text-art" {
+            break;
+        }
+        state.cycle_selected_preset(&registry, 1).unwrap();
+    }
+
+    assert_eq!(state.selected_instance().id, "text-art-1");
+    state.select_option_by_name("text").unwrap();
+}
+
+#[test]
+fn tui_text_editing_updates_text_art_content() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.cycle_selected_preset(&registry, 1).unwrap();
+    state.select_option_by_name("text").unwrap();
+
+    let enter = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let push_o = KeyEvent {
+        code: KeyCode::Char('O'),
+        modifiers: KeyModifiers::SHIFT,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let backspace = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let push_k = KeyEvent {
+        code: KeyCode::Char('K'),
+        modifiers: KeyModifiers::SHIFT,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+
+    ascii_animation::tui::handle_tui_key(&mut state, enter, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, push_o, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, backspace, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, push_k, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, enter, &registry).unwrap();
+
+    assert_eq!(
+        state.selected_instance().options.get("text"),
+        Some(&OptionValue::Text("HELLOK".to_string()))
+    );
+    assert!(!state.editing_text());
+}
+
+#[test]
+fn tui_text_art_text_editing_allows_more_than_twelve_chars() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.cycle_selected_preset(&registry, 1).unwrap();
+    state.select_option_by_name("text").unwrap();
+    state.begin_text_edit();
+
+    for ch in "ABCDEFGHIJK".chars() {
+        state.push_selected_text_char(ch).unwrap();
+    }
+
+    assert_eq!(
+        state.selected_instance().options.get("text"),
+        Some(&OptionValue::Text("HELLOABCDEFGHIJK".to_string()))
+    );
+}
+
+#[test]
 fn tui_copy_status_reports_success_and_failure() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
@@ -500,6 +643,51 @@ fn tui_copy_status_reports_success_and_failure() {
         state.copy_status().unwrap(),
         "Copy failed: clipboard unavailable"
     );
+}
+
+#[test]
+fn tui_text_option_editing_updates_content() {
+    let registry = text_edit_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.cycle_selected_preset(&registry, 1).unwrap();
+    state.select_option_by_name("message").unwrap();
+
+    let enter = KeyEvent {
+        code: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let push_o = KeyEvent {
+        code: KeyCode::Char('O'),
+        modifiers: KeyModifiers::SHIFT,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let backspace = KeyEvent {
+        code: KeyCode::Backspace,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+    let push_k = KeyEvent {
+        code: KeyCode::Char('K'),
+        modifiers: KeyModifiers::SHIFT,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+
+    ascii_animation::tui::handle_tui_key(&mut state, enter, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, push_o, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, backspace, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, push_k, &registry).unwrap();
+    ascii_animation::tui::handle_tui_key(&mut state, enter, &registry).unwrap();
+
+    assert_eq!(
+        state.selected_instance().options.get("message"),
+        Some(&OptionValue::Text("HELLOK".to_string()))
+    );
+    assert!(!state.editing_text());
 }
 #[test]
 fn tui_state_can_adjust_integer_option() {
@@ -613,7 +801,7 @@ fn tui_state_can_edit_selected_instance_structure() {
     assert_eq!(instance.placement, Placement::Right);
     assert_eq!(instance.layer, Layer::Foreground);
     assert_eq!(instance.z_index, 3);
-    assert_eq!(instance.preset, "galaxy");
+    assert_eq!(instance.preset, "text-art");
 }
 #[test]
 fn tui_state_restores_edited_custom_placement_after_cycling_back() {

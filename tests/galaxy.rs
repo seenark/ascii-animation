@@ -79,20 +79,23 @@ fn galaxy_renderer_rejects_unknown_gradient_choice() {
 #[test]
 fn galaxy_renderer_rejects_arms_below_minimum() {
     let mut options = galaxy::descriptor().defaults();
-    options.insert("arms".to_string(), ascii_animation::presets::OptionValue::Int(0));
+    options.insert(
+        "arms".to_string(),
+        ascii_animation::presets::OptionValue::Int(0),
+    );
 
     let err = galaxy::renderer(&options, 7).unwrap_err().to_string();
 
-    assert_eq!(
-        err,
-        "option `arms` is out of range: expected 1..=10, got 0"
-    );
+    assert_eq!(err, "option `arms` is out of range: expected 1..=10, got 0");
 }
 
 #[test]
 fn galaxy_renderer_rejects_stars_below_minimum() {
     let mut options = galaxy::descriptor().defaults();
-    options.insert("stars".to_string(), ascii_animation::presets::OptionValue::Int(-1));
+    options.insert(
+        "stars".to_string(),
+        ascii_animation::presets::OptionValue::Int(-1),
+    );
 
     let err = galaxy::renderer(&options, 7).unwrap_err().to_string();
 

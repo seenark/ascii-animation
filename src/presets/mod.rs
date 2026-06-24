@@ -4,6 +4,7 @@ use crate::render::AnimationRenderer;
 use crate::{AsciiAnimError, Result};
 
 pub mod galaxy;
+pub mod text_art;
 
 pub type RendererFactory =
     fn(&BTreeMap<String, OptionValue>, u64) -> Result<Box<dyn AnimationRenderer>>;
@@ -15,6 +16,7 @@ pub enum OptionValue {
     Float(f64),
     Bool(bool),
     Choice(String),
+    Text(String),
 }
 
 impl OptionValue {
@@ -24,6 +26,7 @@ impl OptionValue {
             Self::Float(value) => trim_float(*value),
             Self::Bool(value) => value.to_string(),
             Self::Choice(value) => value.clone(),
+            Self::Text(value) => value.clone(),
         }
     }
 }
@@ -34,6 +37,7 @@ pub enum OptionKind {
     Float { min: f64, max: f64 },
     Bool,
     Choice { choices: Vec<String> },
+    Text { max_len: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +124,22 @@ impl OptionDescriptor {
         }
     }
 
+    pub fn text(
+        name: &str,
+        label: &str,
+        default: &str,
+        max_len: usize,
+        rebuilds_state: bool,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            label: label.to_string(),
+            default: OptionValue::Text(default.to_string()),
+            kind: OptionKind::Text { max_len },
+            rebuilds_state,
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -177,6 +197,28 @@ impl OptionDescriptor {
                     actual: value,
                 })
             }
+            (OptionKind::Text { max_len }, OptionValue::Text(value))
+                if value.chars().count() <= *max_len
+                    && value.chars().all(|ch| ch.is_ascii_graphic() || ch == ' ') =>
+            {
+                Ok(OptionValue::Text(value))
+            }
+            (OptionKind::Text { max_len }, OptionValue::Text(value))
+                if value.chars().count() > *max_len =>
+            {
+                Err(AsciiAnimError::TextTooLong {
+                    option: self.name.clone(),
+                    max: *max_len,
+                    actual: value.chars().count(),
+                })
+            }
+            (OptionKind::Text { .. }, OptionValue::Text(value)) => {
+                Err(AsciiAnimError::InvalidOptionType {
+                    option: self.name.clone(),
+                    expected: "ASCII text",
+                    actual: value,
+                })
+            }
             (kind, value) => Err(AsciiAnimError::InvalidOptionType {
                 option: self.name.clone(),
                 expected: kind.expected_name(),
@@ -200,6 +242,7 @@ impl OptionKind {
             Self::Float { .. } => "float",
             Self::Bool => "bool",
             Self::Choice { .. } => "choice",
+            Self::Text { .. } => "text",
         }
     }
 }
@@ -318,12 +361,12 @@ impl PresetRegistry {
 
 impl Default for PresetRegistry {
     fn default() -> Self {
-        Self::new(vec![galaxy::descriptor()])
+        Self::new(vec![galaxy::descriptor(), text_art::descriptor()])
     }
 }
 
 pub fn build_default_registry() -> PresetRegistry {
-    PresetRegistry::new(vec![galaxy::descriptor()])
+    PresetRegistry::new(vec![galaxy::descriptor(), text_art::descriptor()])
 }
 
 fn trim_float(value: f64) -> String {

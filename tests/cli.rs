@@ -14,7 +14,6 @@ static HOME_LOCK: Mutex<()> = Mutex::new(());
 
 static RECORDED_SEEDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
 
-
 fn galaxy_scene(color: bool) -> Scene {
     let mut options = BTreeMap::new();
     options.insert("arms".to_string(), OptionValue::Int(3));
@@ -29,6 +28,29 @@ fn galaxy_scene(color: bool) -> Scene {
         instances: vec![AnimationInstance {
             id: "galaxy-1".to_string(),
             preset: "galaxy".to_string(),
+            options,
+            placement: Placement::Center,
+            layer: Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        }],
+    }
+}
+
+fn text_art_scene(color: bool) -> Scene {
+    let mut options = BTreeMap::new();
+    options.insert("text".to_string(), OptionValue::Text("OK".to_string()));
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+
+    Scene {
+        frame_rate: 30,
+        color,
+        instances: vec![AnimationInstance {
+            id: "text-art-1".to_string(),
+            preset: "text-art".to_string(),
             options,
             placement: Placement::Center,
             layer: Layer::Normal,
@@ -104,7 +126,6 @@ fn parses_explicit_seed_value() {
 
     assert!(format!("{args:?}").contains("seed: Some(17)"));
 }
-
 
 #[test]
 fn preserves_config_scene_color_without_no_color() {
@@ -305,13 +326,7 @@ fn parses_registered_preset_flags_from_descriptor_metadata() {
             "Test preset",
             vec![
                 ascii_animation::presets::OptionDescriptor::int_step(
-                    "count",
-                    "Count",
-                    3,
-                    1,
-                    9,
-                    3,
-                    false,
+                    "count", "Count", 3, 1, 9, 3, false,
                 ),
                 ascii_animation::presets::OptionDescriptor::choice(
                     "palette",
@@ -320,12 +335,25 @@ fn parses_registered_preset_flags_from_descriptor_metadata() {
                     vec!["mono", "cosmic"],
                     false,
                 ),
+                ascii_animation::presets::OptionDescriptor::text(
+                    "message", "Message", "HELLO", 12, false,
+                ),
             ],
             demo_renderer,
         ),
     ]);
     let args = ascii_animation::cli::parse_run_args_from(
-        ["ascii-animation", "run", "demo", "--count", "7", "--palette", "cosmic"],
+        [
+            "ascii-animation",
+            "run",
+            "demo",
+            "--count",
+            "7",
+            "--palette",
+            "cosmic",
+            "--message",
+            "HELLO",
+        ],
         &registry,
     )
     .unwrap();
@@ -340,6 +368,151 @@ fn parses_registered_preset_flags_from_descriptor_metadata() {
         scene.instances[0].options.get("palette"),
         Some(&OptionValue::Choice("cosmic".to_string()))
     );
+    assert_eq!(
+        scene.instances[0].options.get("message"),
+        Some(&OptionValue::Text("HELLO".to_string()))
+    );
+}
+
+#[test]
+fn parses_direct_text_art_command() {
+    let args = parse_run([
+        "ascii-animation",
+        "run",
+        "text-art",
+        "--text",
+        "CODE",
+        "--text-font",
+        "cyber",
+        "--text-fill",
+        "triangle",
+        "--text-palette",
+        "plasma",
+        "--text-effect",
+        "glitch",
+        "--text-bg",
+        "noise",
+        "--text-speed",
+        "2.5",
+        "--text-scale",
+        "1.2",
+        "--text-drop-shadow",
+        "false",
+        "--text-block-shadow",
+        "true",
+        "--no-color",
+    ]);
+    let registry = build_default_registry();
+    let scene = scene_from_run_args(&args, &registry).unwrap();
+
+    assert!(!scene.color);
+    assert_eq!(scene.instances[0].preset, "text-art");
+    assert_eq!(scene.instances[0].id, "text-art-1");
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text")
+            .unwrap()
+            .as_cli_value(),
+        "CODE"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-font")
+            .unwrap()
+            .as_cli_value(),
+        "cyber"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-fill")
+            .unwrap()
+            .as_cli_value(),
+        "triangle"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-palette")
+            .unwrap()
+            .as_cli_value(),
+        "plasma"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-effect")
+            .unwrap()
+            .as_cli_value(),
+        "glitch"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-bg")
+            .unwrap()
+            .as_cli_value(),
+        "noise"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-speed")
+            .unwrap()
+            .as_cli_value(),
+        "2.5"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-scale")
+            .unwrap()
+            .as_cli_value(),
+        "1.2"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-drop-shadow")
+            .unwrap()
+            .as_cli_value(),
+        "false"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-block-shadow")
+            .unwrap()
+            .as_cli_value(),
+        "true"
+    );
+}
+
+#[test]
+fn parses_long_direct_text_art_command() {
+    let text = "LONG TERMINAL TEXT";
+    let args = parse_run([
+        "ascii-animation",
+        "run",
+        "text-art",
+        "--text",
+        text,
+        "--text-bg",
+        "none",
+    ]);
+    let registry = build_default_registry();
+    let scene = scene_from_run_args(&args, &registry).unwrap();
+
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text")
+            .unwrap()
+            .as_cli_value(),
+        text
+    );
 }
 
 #[test]
@@ -351,13 +524,7 @@ fn clap_help_lists_descriptor_defined_run_flags() {
             "Test preset",
             vec![
                 ascii_animation::presets::OptionDescriptor::int_step(
-                    "count",
-                    "Count",
-                    3,
-                    1,
-                    9,
-                    3,
-                    false,
+                    "count", "Count", 3, 1, 9, 3, false,
                 ),
                 ascii_animation::presets::OptionDescriptor::choice(
                     "palette",
@@ -388,13 +555,7 @@ fn clap_rejects_unknown_run_flags_after_descriptor_registration() {
             "Demo",
             "Test preset",
             vec![ascii_animation::presets::OptionDescriptor::int_step(
-                "count",
-                "Count",
-                3,
-                1,
-                9,
-                3,
-                false,
+                "count", "Count", 3, 1, 9, 3, false,
             )],
             demo_renderer,
         ),
@@ -474,7 +635,6 @@ fn assert_filled_region(
         }
     }
 }
-
 
 #[test]
 fn render_scene_frame_dispatches_registered_presets() {
@@ -588,8 +748,6 @@ fn render_scene_frame_wraps_instance_seed_derivation() {
     assert_eq!(*RECORDED_SEEDS.lock().unwrap(), vec![u64::MAX, 0]);
 }
 
-
-
 #[test]
 fn direct_scene_renders_non_empty_frame() {
     let args = parse_run([
@@ -598,6 +756,32 @@ fn direct_scene_renders_non_empty_frame() {
         "galaxy",
         "--stars",
         "100",
+        "--no-color",
+    ]);
+    let registry = build_default_registry();
+    let scene = scene_from_run_args(&args, &registry).unwrap();
+
+    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
+    let text = render_to_ansi(&frame, false);
+
+    assert_eq!(text.lines().count(), 16);
+    assert!(text.chars().any(|ch| ch != ' ' && ch != '\n'));
+}
+
+#[test]
+fn direct_text_art_scene_renders_non_empty_frame() {
+    let args = parse_run([
+        "ascii-animation",
+        "run",
+        "text-art",
+        "--text",
+        "OK",
+        "--text-bg",
+        "none",
+        "--text-effect",
+        "wave",
+        "--text-amp",
+        "0",
         "--no-color",
     ]);
     let registry = build_default_registry();

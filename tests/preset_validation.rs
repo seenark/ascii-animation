@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use ascii_animation::presets::{galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor};
+use ascii_animation::presets::{
+    galaxy, OptionDescriptor, OptionKind, OptionValue, PresetDescriptor,
+};
 
 fn demo_renderer(
     _options: &BTreeMap<String, OptionValue>,
@@ -8,7 +10,6 @@ fn demo_renderer(
 ) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
     unreachable!("validation tests do not render")
 }
-
 
 fn descriptor() -> PresetDescriptor {
     PresetDescriptor::new(
@@ -26,6 +27,7 @@ fn descriptor() -> PresetDescriptor {
                 false,
             ),
             OptionDescriptor::bool("enabled", "Enabled", true, false),
+            OptionDescriptor::text("message", "Message", "HELLO", 12, true),
         ],
         demo_renderer,
     )
@@ -42,6 +44,10 @@ fn validation_fills_defaults() {
         Some(&OptionValue::Choice("cosmic".to_string()))
     );
     assert_eq!(values.get("enabled"), Some(&OptionValue::Bool(true)));
+    assert_eq!(
+        values.get("message"),
+        Some(&OptionValue::Text("HELLO".to_string()))
+    );
 }
 
 #[test]
@@ -93,6 +99,38 @@ fn validation_rejects_invalid_choice() {
     assert_eq!(
         err,
         "invalid choice for `palette`: expected one of [\"cosmic\", \"mono\"], got `bad`"
+    );
+}
+
+#[test]
+fn validation_rejects_text_longer_than_max_len() {
+    let mut raw = BTreeMap::new();
+    raw.insert(
+        "message".to_string(),
+        OptionValue::Text("HELLO WORLD!!".to_string()),
+    );
+
+    let err = descriptor().validate_options(&raw).unwrap_err().to_string();
+
+    assert_eq!(
+        err,
+        "option `message` is too long: expected at most 12 characters, got 13"
+    );
+}
+
+#[test]
+fn validation_rejects_non_ascii_text() {
+    let mut raw = BTreeMap::new();
+    raw.insert(
+        "message".to_string(),
+        OptionValue::Text("HELLO ☃".to_string()),
+    );
+
+    let err = descriptor().validate_options(&raw).unwrap_err().to_string();
+
+    assert_eq!(
+        err,
+        "invalid value for `message`: expected ASCII text, got HELLO ☃"
     );
 }
 
