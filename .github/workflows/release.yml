@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag matches crate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+
+          echo "Release tag version: ${VERSION}"
+          echo "Cargo package version: ${CARGO_VERSION}"
+
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error::Cargo package version ${CARGO_VERSION} does not match release tag ${VERSION}"
+            exit 1
+          fi
+
+  build:
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            raw_name: ascii-animation-${{ github.ref_name }}-x86_64-unknown-linux-gnu
+            archive_name: ascii-animation-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            raw_name: ascii-animation-${{ github.ref_name }}-aarch64-unknown-linux-gnu
+            archive_name: ascii-animation-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            raw_name: ascii-animation-${{ github.ref_name }}-aarch64-apple-darwin
+            archive_name: ascii-animation-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust stable target
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
+          rustup default stable
+      - name: Build release binary
+        shell: bash
+        run: cargo build --locked --release --target "${{ matrix.target }}"
+      - name: Prepare unix assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp "target/${{ matrix.target }}/release/ascii-animation" "release-assets/${{ matrix.raw_name }}"
+          chmod 755 "release-assets/${{ matrix.raw_name }}"
+          cp "release-assets/${{ matrix.raw_name }}" "release-assets/ascii-animation"
+          tar -czf "release-assets/${{ matrix.archive_name }}" -C release-assets ascii-animation
+          rm "release-assets/ascii-animation"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            release-assets/${{ matrix.raw_name }}
+            release-assets/${{ matrix.archive_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Flatten release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release-assets
+          find dist -mindepth 2 -type f -exec cp {} dist/release-assets/ \;
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/release-assets
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 | sed 's#  \./#  #' > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release-assets/*
