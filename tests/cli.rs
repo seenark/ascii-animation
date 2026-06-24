@@ -37,28 +37,6 @@ fn galaxy_scene(color: bool) -> Scene {
     }
 }
 
-fn text_art_scene(color: bool) -> Scene {
-    let mut options = BTreeMap::new();
-    options.insert("text".to_string(), OptionValue::Text("OK".to_string()));
-    options.insert(
-        "text-bg".to_string(),
-        OptionValue::Choice("none".to_string()),
-    );
-
-    Scene {
-        frame_rate: 30,
-        color,
-        instances: vec![AnimationInstance {
-            id: "text-art-1".to_string(),
-            preset: "text-art".to_string(),
-            options,
-            placement: Placement::Center,
-            layer: Layer::Normal,
-            z_index: 0,
-            enabled: true,
-        }],
-    }
-}
 
 fn parse_run<I, S>(args: I) -> ascii_animation::cli::RunArgs
 where
@@ -392,6 +370,8 @@ fn parses_direct_text_art_command() {
         "glitch",
         "--text-bg",
         "noise",
+        "--text-overflow",
+        "slide",
         "--text-speed",
         "2.5",
         "--text-scale",
@@ -447,6 +427,14 @@ fn parses_direct_text_art_command() {
             .unwrap()
             .as_cli_value(),
         "glitch"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-overflow")
+            .unwrap()
+            .as_cli_value(),
+        "slide"
     );
     assert_eq!(
         scene.instances[0]
@@ -512,6 +500,69 @@ fn parses_long_direct_text_art_command() {
             .unwrap()
             .as_cli_value(),
         text
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-overflow")
+            .unwrap()
+            .as_cli_value(),
+        "extend"
+    );
+}
+
+#[test]
+fn render_centered_scene_frame_extends_text_art_canvas_for_extend_overflow() {
+    let registry = build_default_registry();
+    let mut options = ascii_animation::presets::text_art::descriptor().defaults();
+    options.insert(
+        "text".to_string(),
+        OptionValue::Text("LONG TERMINAL TEXT".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("wave".to_string()),
+    );
+    options.insert("text-amp".to_string(), OptionValue::Float(0.0));
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-block-shadow".to_string(), OptionValue::Bool(false));
+    let options = registry
+        .get("text-art")
+        .unwrap()
+        .validate_options(&options)
+        .unwrap();
+    let scene = Scene {
+        frame_rate: 30,
+        color: false,
+        instances: vec![AnimationInstance {
+            id: "text-art-1".to_string(),
+            preset: "text-art".to_string(),
+            options,
+            placement: Placement::Center,
+            layer: Layer::Normal,
+            z_index: 0,
+            enabled: true,
+        }],
+    };
+
+    let frame = render_centered_scene_frame(&scene, &registry, 7, 0.0, 124, 16).unwrap();
+    let plain = render_to_ansi(&frame, false);
+
+    assert_eq!(frame.width(), 124);
+    assert!(plain.lines().any(|line| line.chars().any(|ch| ch != ' ')));
+    assert!(
+        plain.lines().any(|line| {
+            line.char_indices()
+                .rev()
+                .find(|(_, ch)| *ch != ' ')
+                .map(|(idx, _)| idx > 100)
+                .unwrap_or(false)
+        })
     );
 }
 

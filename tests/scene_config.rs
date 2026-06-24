@@ -631,6 +631,31 @@ fn tui_text_art_text_editing_allows_more_than_twelve_chars() {
 }
 
 #[test]
+fn tui_text_art_overflow_choice_cycles_between_extend_and_slide() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.cycle_selected_preset(&registry, 1).unwrap();
+    state.select_option_by_name("text-overflow").unwrap();
+
+    assert_eq!(
+        state.selected_instance().options.get("text-overflow"),
+        Some(&OptionValue::Choice("extend".to_string()))
+    );
+
+    state.adjust_selected_option(1).unwrap();
+    assert_eq!(
+        state.selected_instance().options.get("text-overflow"),
+        Some(&OptionValue::Choice("slide".to_string()))
+    );
+
+    state.adjust_selected_option(1).unwrap();
+    assert_eq!(
+        state.selected_instance().options.get("text-overflow"),
+        Some(&OptionValue::Choice("extend".to_string()))
+    );
+}
+
+#[test]
 fn tui_copy_status_reports_success_and_failure() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();

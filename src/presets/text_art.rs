@@ -158,6 +158,7 @@ const PALETTE_CANDY: [Rgb; 7] = [
 #[derive(Debug, Clone)]
 struct TextArtOptions {
     text: String,
+    overflow: String,
     font: String,
     fill: String,
     palette: String,
@@ -243,7 +244,6 @@ pub struct TextArtRenderer {
     particle_seeds: Vec<ParticleSeed>,
     seed: u64,
 }
-
 pub fn descriptor() -> PresetDescriptor {
     PresetDescriptor::new(
         PRESET_NAME,
@@ -251,6 +251,13 @@ pub fn descriptor() -> PresetDescriptor {
         "Animated 5x7 ASCII text art with fonts, palettes, effects, and backgrounds",
         vec![
             OptionDescriptor::text("text", "Text", "HELLO", TEXT_MAX_LEN, true),
+            OptionDescriptor::choice(
+                "text-overflow",
+                "Overflow",
+                "extend",
+                vec!["extend", "slide"],
+                false,
+            ),
             OptionDescriptor::choice(
                 "text-font",
                 "Font",
@@ -339,6 +346,7 @@ pub fn descriptor() -> PresetDescriptor {
         ],
         boxed_renderer,
     )
+    .with_logical_width_hint(logical_width_hint)
 }
 
 pub fn boxed_renderer(
@@ -348,6 +356,15 @@ pub fn boxed_renderer(
     Ok(Box::new(renderer(options, seed)?))
 }
 
+
+pub fn logical_width_hint(values: &BTreeMap<String, OptionValue>) -> Result<Option<u16>> {
+    let options = TextArtOptions::from_values(values)?;
+    if options.overflow != "extend" {
+        return Ok(None);
+    }
+
+    Ok(Some(scaled_text_width(&options)))
+}
 pub fn renderer(options: &BTreeMap<String, OptionValue>, seed: u64) -> Result<TextArtRenderer> {
     let validated = descriptor().validate_options(options)?;
     let options = TextArtOptions::from_values(&validated)?;
@@ -373,6 +390,7 @@ impl AnimationRenderer for TextArtRenderer {
         let cx = text_origin_x(
             context.width,
             scaled_width,
+            &self.options.overflow,
             self.options.speed,
             context.elapsed_seconds,
         );
@@ -445,7 +463,10 @@ impl AnimationRenderer for TextArtRenderer {
                 if self.options.drop_shadow {
                     let sx = px + 1;
                     let sy = py + 1;
-                    if sx >= 0 && sy >= 0 && sx < context.width as i32 && sy < context.height as i32
+                    if sx >= 0
+                        && sy >= 0
+                        && sx < context.width as i32
+                        && sy < context.height as i32
                     {
                         frame.put_cell(
                             context.x_offset + sx as u16,
@@ -506,6 +527,12 @@ impl TextArtOptions {
     fn from_values(values: &BTreeMap<String, OptionValue>) -> Result<Self> {
         Ok(Self {
             text: get_text(values, "text")?,
+            overflow: get_choice_or_default(
+                values,
+                "text-overflow",
+                "extend",
+                &["extend", "slide"],
+            )?,
             font: get_choice(
                 values,
                 "text-font",
@@ -602,13 +629,28 @@ impl TextBitmap {
     }
 }
 
+fn text_bitmap_width(options: &TextArtOptions) -> usize {
+    let text_len = options.text.chars().count();
+    if text_len == 0 {
+        return 5;
+    }
+    text_len * 5 + text_len.saturating_sub(1) * options.spacing.max(0) as usize
+}
+
+fn scaled_text_width(options: &TextArtOptions) -> u16 {
+    ((text_bitmap_width(options) as f64) * options.scale)
+        .round()
+        .max(1.0)
+        .min(u16::MAX as f64) as u16
+}
+
 fn build_text_bitmap(options: &TextArtOptions) -> TextBitmap {
     let text: Vec<char> = options.text.chars().map(normalize_char).collect();
     if text.is_empty() {
         return TextBitmap::blank(5, 7);
     }
 
-    let width = text.len() * 5 + text.len().saturating_sub(1) * options.spacing.max(0) as usize;
+    let width = text_bitmap_width(options);
     let mut bitmap = TextBitmap::blank(width.max(5), 7);
     bitmap.visible_chars = text.iter().filter(|ch| **ch != ' ').count().max(1);
     let mut offset_x = 0usize;
@@ -670,10 +712,20 @@ fn build_text_bitmap(options: &TextArtOptions) -> TextBitmap {
     bitmap
 }
 
-fn text_origin_x(context_width: u16, scaled_width: i32, speed: f64, elapsed_seconds: f64) -> i32 {
+fn text_origin_x(
+    context_width: u16,
+    scaled_width: i32,
+    overflow: &str,
+    speed: f64,
+    elapsed_seconds: f64,
+) -> i32 {
     let context_width = context_width as i32;
     if scaled_width <= context_width {
         return ((context_width - scaled_width) / 2).max(0);
+    }
+
+    if overflow == "extend" {
+        return 0;
     }
 
     let overhang = scaled_width - context_width;
@@ -1307,6 +1359,19 @@ fn get_choice(
             preset: PRESET_NAME.to_string(),
             option: key.to_string(),
         }),
+    }
+}
+
+fn get_choice_or_default(
+    values: &BTreeMap<String, OptionValue>,
+    key: &str,
+    default: &str,
+    choices: &[&str],
+) -> Result<String> {
+    if values.contains_key(key) {
+        get_choice(values, key, choices)
+    } else {
+        Ok(default.to_string())
     }
 }
 

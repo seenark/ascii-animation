@@ -9,6 +9,8 @@ pub mod text_art;
 pub type RendererFactory =
     fn(&BTreeMap<String, OptionValue>, u64) -> Result<Box<dyn AnimationRenderer>>;
 
+pub type LogicalWidthHintFactory = fn(&BTreeMap<String, OptionValue>) -> Result<Option<u16>>;
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "value")]
 pub enum OptionValue {
@@ -254,6 +256,7 @@ pub struct PresetDescriptor {
     description: String,
     options: Vec<OptionDescriptor>,
     renderer_factory: RendererFactory,
+    logical_width_hint_factory: Option<LogicalWidthHintFactory>,
 }
 
 impl PresetDescriptor {
@@ -270,6 +273,7 @@ impl PresetDescriptor {
             description: description.to_string(),
             options,
             renderer_factory,
+            logical_width_hint_factory: None,
         }
     }
 
@@ -292,6 +296,21 @@ impl PresetDescriptor {
         seed: u64,
     ) -> Result<Box<dyn AnimationRenderer>> {
         (self.renderer_factory)(options, seed)
+    }
+
+    pub fn with_logical_width_hint(mut self, factory: LogicalWidthHintFactory) -> Self {
+        self.logical_width_hint_factory = Some(factory);
+        self
+    }
+
+    pub fn logical_width_hint(
+        &self,
+        options: &BTreeMap<String, OptionValue>,
+    ) -> Result<Option<u16>> {
+        match self.logical_width_hint_factory {
+            Some(factory) => factory(options),
+            None => Ok(None),
+        }
     }
 
     pub fn defaults(&self) -> BTreeMap<String, OptionValue> {

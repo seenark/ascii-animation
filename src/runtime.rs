@@ -101,6 +101,26 @@ pub fn render_scene_frame(
     Ok(frame)
 }
 
+pub fn logical_scene_dimensions(scene: &Scene, registry: &PresetRegistry) -> Result<(u16, u16)> {
+    let mut width = DEFAULT_SCENE_WIDTH;
+    let height = DEFAULT_SCENE_HEIGHT;
+
+    for instance in scene.instances.iter().filter(|instance| instance.enabled) {
+        let descriptor = registry.get(&instance.preset)?;
+        let Some(hint) = descriptor.logical_width_hint(&instance.options)? else {
+            continue;
+        };
+        let required_width = match instance.placement {
+            Placement::Center | Placement::Left | Placement::Right => hint.saturating_mul(2),
+            Placement::Top | Placement::Bottom | Placement::Fill => hint,
+            Placement::Custom { .. } => 0,
+        };
+        width = width.max(required_width);
+    }
+
+    Ok((width, height))
+}
+
 pub fn render_centered_scene_frame(
     scene: &Scene,
     registry: &PresetRegistry,
@@ -109,13 +129,14 @@ pub fn render_centered_scene_frame(
     viewport_width: u16,
     viewport_height: u16,
 ) -> Result<FrameBuffer> {
+    let (logical_width, logical_height) = logical_scene_dimensions(scene, registry)?;
     let logical = render_scene_frame(
         scene,
         registry,
         seed,
         elapsed_seconds,
-        DEFAULT_SCENE_WIDTH,
-        DEFAULT_SCENE_HEIGHT,
+        logical_width,
+        logical_height,
     )?;
     Ok(center_frame(&logical, viewport_width, viewport_height))
 }
@@ -140,6 +161,23 @@ fn center_frame(source: &FrameBuffer, viewport_width: u16, viewport_height: u16)
     }
 
     frame
+}
+
+pub fn scene_viewport_size_for_terminal(
+    scene: &Scene,
+    registry: &PresetRegistry,
+    terminal_width: u16,
+    terminal_height: u16,
+) -> Result<(u16, u16)> {
+    let (base_width, base_height) =
+        animation_viewport_size_for_terminal(terminal_width, terminal_height);
+    let (logical_width, _) = logical_scene_dimensions(scene, registry)?;
+    let expanded_width = if logical_width > DEFAULT_SCENE_WIDTH {
+        logical_width.min(terminal_width)
+    } else {
+        base_width
+    };
+    Ok((base_width.max(expanded_width), base_height))
 }
 
 pub fn prepare_scene_terminal<W: Write, T: TerminalDriver>(
@@ -206,7 +244,7 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
 
         let (terminal_width, terminal_height) = terminal.size().map_err(terminal_error)?;
         let (viewport_width, viewport_height) =
-            animation_viewport_size_for_terminal(terminal_width, terminal_height);
+            scene_viewport_size_for_terminal(&scene, registry, terminal_width, terminal_height)?;
         let frame = render_centered_scene_frame(
             &scene,
             registry,
@@ -477,6 +515,74 @@ mod tests {
 
         assert!(output.contains(&expected_move));
         assert!(!output.contains("\u{1b}[2;1H"));
+    }
+
+
+    #[test]
+    fn logical_scene_dimensions_use_text_art_extend_width_hint_for_center_placement() {
+        let registry = PresetRegistry::default();
+        let mut options = crate::presets::text_art::descriptor().defaults();
+        options.insert(
+            "text".to_string(),
+            crate::presets::OptionValue::Text("LONG TERMINAL TEXT".to_string()),
+        );
+        let options = registry
+            .get("text-art")
+            .unwrap()
+            .validate_options(&options)
+            .unwrap();
+        let scene = Scene {
+            frame_rate: 30,
+            color: false,
+            instances: vec![AnimationInstance {
+                id: "text-art-1".to_string(),
+                preset: "text-art".to_string(),
+                options,
+                placement: Placement::Center,
+                layer: crate::scene::Layer::Normal,
+                z_index: 0,
+                enabled: true,
+            }],
+        };
+
+        assert_eq!(logical_scene_dimensions(&scene, &registry).unwrap().0, 248);
+    }
+
+    #[test]
+    fn logical_scene_dimensions_do_not_expand_for_text_art_slide_overflow() {
+        let registry = PresetRegistry::default();
+        let mut options = crate::presets::text_art::descriptor().defaults();
+        options.insert(
+            "text".to_string(),
+            crate::presets::OptionValue::Text("LONG TERMINAL TEXT".to_string()),
+        );
+        options.insert(
+            "text-overflow".to_string(),
+            crate::presets::OptionValue::Choice("slide".to_string()),
+        );
+        let options = registry
+            .get("text-art")
+            .unwrap()
+            .validate_options(&options)
+            .unwrap();
+        let scene = Scene {
+            frame_rate: 30,
+            color: false,
+            instances: vec![AnimationInstance {
+                id: "text-art-1".to_string(),
+                preset: "text-art".to_string(),
+                options,
+                placement: Placement::Center,
+                layer: crate::scene::Layer::Normal,
+                z_index: 0,
+                enabled: true,
+            }],
+        };
+
+        assert_eq!(
+            logical_scene_dimensions(&scene, &registry).unwrap().0,
+            DEFAULT_SCENE_WIDTH
+        );
     }
 
     #[test]

@@ -96,6 +96,10 @@ fn text_art_descriptor_has_required_options_and_defaults() {
 
     assert_eq!(descriptor.name(), "text-art");
     assert_eq!(defaults.get("text").unwrap().as_cli_value(), "HELLO");
+    assert_eq!(
+        defaults.get("text-overflow").unwrap().as_cli_value(),
+        "extend"
+    );
     assert_eq!(defaults.get("text-font").unwrap().as_cli_value(), "block");
     assert_eq!(defaults.get("text-fill").unwrap().as_cli_value(), "auto");
     assert_eq!(
@@ -302,7 +306,7 @@ fn text_art_renderer_accepts_sixty_four_chars_and_rejects_sixty_five() {
     accepted.insert("text-speed".to_string(), OptionValue::Float(1.0));
     text_art::renderer(&accepted, 7).unwrap();
 
-    let mut rejected = clean_text_options(&"A".repeat(65));
+    let rejected = clean_text_options(&"A".repeat(65));
     let err = text_art::renderer(&rejected, 7).unwrap_err().to_string();
 
     assert_eq!(
@@ -312,9 +316,28 @@ fn text_art_renderer_accepts_sixty_four_chars_and_rejects_sixty_five() {
 }
 
 #[test]
-fn text_art_scrolls_overflowing_text_to_reveal_trailing_characters() {
+fn text_art_default_overflow_extends_without_horizontal_slide() {
     let mut options = clean_text_options("A     Z");
     options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+
+    let first_frame = render_text_frame_at(&options, 10, 9, 0.0);
+    let later_frame = render_text_frame_at(&options, 10, 9, 6.2);
+
+    let expected_a = [
+        ".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#",
+    ];
+    assert_eq!(visible_window(&first_frame, 0, 1, 5, 7), expected_a);
+    assert_eq!(visible_window(&later_frame, 0, 1, 5, 7), expected_a);
+}
+
+#[test]
+fn text_art_slide_overflow_reveals_trailing_characters() {
+    let mut options = clean_text_options("A     Z");
+    options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+    options.insert(
+        "text-overflow".to_string(),
+        OptionValue::Choice("slide".to_string()),
+    );
 
     let first_frame = render_text_frame_at(&options, 10, 9, 0.0);
     assert_eq!(
@@ -331,6 +354,38 @@ fn text_art_scrolls_overflowing_text_to_reveal_trailing_characters() {
             "#####", "....#", "...#.", "..#..", ".#...", "#....", "#####",
         ]
     );
+}
+ 
+#[test]
+fn text_art_rejects_invalid_overflow_choice() {
+    let mut options = text_art::descriptor().defaults();
+    options.insert(
+        "text-overflow".to_string(),
+        OptionValue::Choice("wrap".to_string()),
+    );
+
+    let err = text_art::renderer(&options, 7).unwrap_err().to_string();
+
+    assert_eq!(
+        err,
+        "invalid choice for `text-overflow`: expected one of [\"extend\", \"slide\"], got `wrap`"
+    );
+}
+
+#[test]
+fn text_art_renderer_defaults_missing_overflow_to_extend_for_saved_scenes() {
+    let mut options = clean_text_options("A     Z");
+    options.remove("text-overflow");
+    options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+
+    let first_frame = render_text_frame_at(&options, 10, 9, 0.0);
+    let later_frame = render_text_frame_at(&options, 10, 9, 6.2);
+
+    let expected_a = [
+        ".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#",
+    ];
+    assert_eq!(visible_window(&first_frame, 0, 1, 5, 7), expected_a);
+    assert_eq!(visible_window(&later_frame, 0, 1, 5, 7), expected_a);
 }
 
 #[test]
