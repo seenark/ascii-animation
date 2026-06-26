@@ -37,7 +37,7 @@ This project is installed from source. npm is not part of the install flow.
 If you use mise, the repo already pins Rust in `mise.toml`:
 
 ```sh
-mise install
+mise use -g github:seenark/ascii-animation
 ```
 
 ### Install the binary
