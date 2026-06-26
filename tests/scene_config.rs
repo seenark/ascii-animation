@@ -711,16 +711,93 @@ fn tui_text_art_overflow_choice_cycles_between_extend_and_slide() {
         Some(&OptionValue::Choice("extend".to_string()))
     );
 
-    state.adjust_selected_option(1).unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
     assert_eq!(
         state.selected_instance().options.get("text-overflow"),
         Some(&OptionValue::Choice("slide".to_string()))
     );
 
-    state.adjust_selected_option(1).unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
     assert_eq!(
         state.selected_instance().options.get("text-overflow"),
         Some(&OptionValue::Choice("extend".to_string()))
+    );
+}
+
+#[test]
+fn tui_text_art_hides_unrelated_effect_controls() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.cycle_selected_preset(&registry, 1).unwrap();
+
+    assert_eq!(state.selected_instance().id, "text-art-1");
+    assert!(state.visible_option_names().contains(&"text".to_string()));
+    assert!(state.visible_option_names().contains(&"text-effect".to_string()));
+    assert!(state.visible_option_names().contains(&"text-color-mode".to_string()));
+    assert!(state.visible_option_names().contains(&"text-bright".to_string()));
+    assert!(!state.visible_option_names().contains(&"text-amp".to_string()));
+    assert!(!state.visible_option_names().contains(&"text-freq".to_string()));
+    assert!(!state.visible_option_names().contains(&"text-glitch".to_string()));
+
+    state.select_option_by_name("text-effect").unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
+    assert!(state.visible_option_names().contains(&"text-speed".to_string()));
+    assert!(state.visible_option_names().contains(&"text-amp".to_string()));
+    assert!(state.visible_option_names().contains(&"text-freq".to_string()));
+    assert!(!state.visible_option_names().contains(&"text-glitch".to_string()));
+
+    state.adjust_selected_option(1, &registry).unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
+    assert!(state.visible_option_names().contains(&"text-glitch".to_string()));
+    assert!(!state.visible_option_names().contains(&"text-amp".to_string()));
+    assert!(!state.visible_option_names().contains(&"text-freq".to_string()));
+}
+
+#[test]
+fn tui_text_art_shows_color_direction_only_for_directional_color_modes() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.cycle_selected_preset(&registry, 1).unwrap();
+
+    assert!(state
+        .visible_option_names()
+        .contains(&"text-color-direction".to_string()));
+
+    state.select_option_by_name("text-color-mode").unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
+    assert!(state
+        .visible_option_names()
+        .contains(&"text-color-direction".to_string()));
+
+    state.adjust_selected_option(1, &registry).unwrap();
+    assert!(!state
+        .visible_option_names()
+        .contains(&"text-color-direction".to_string()));
+
+    state.adjust_selected_option(1, &registry).unwrap();
+    assert!(state
+        .visible_option_names()
+        .contains(&"text-color-direction".to_string()));
+    assert!(state.visible_option_names().contains(&"text-speed".to_string()));
+}
+
+#[test]
+fn tui_option_display_formats_floats_with_two_decimals() {
+    assert_eq!(
+        ascii_animation::tui::format_tui_option_value(&OptionValue::Float(1.5)),
+        "1.50"
+    );
+    assert_eq!(
+        ascii_animation::tui::format_tui_option_value(&OptionValue::Float(1.0)),
+        "1.00"
+    );
+    assert_eq!(
+        ascii_animation::tui::format_tui_option_value(&OptionValue::Float(0.15)),
+        "0.15"
+    );
+    assert_eq!(
+        ascii_animation::tui::format_tui_option_value(&OptionValue::Choice("wave".to_string())),
+        "wave"
     );
 }
 
@@ -789,7 +866,7 @@ fn tui_state_can_adjust_integer_option() {
     let mut state = TuiState::default_with_registry(&registry).unwrap();
     state.select_option_by_name("arms").unwrap();
 
-    state.adjust_selected_option(1).unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
 
     assert_eq!(
         state.scene.instances[0]
@@ -807,7 +884,7 @@ fn tui_state_applies_descriptor_integer_steps() {
     let mut state = TuiState::default_with_registry(&registry).unwrap();
     state.select_option_by_name("stars").unwrap();
 
-    state.adjust_selected_option(1).unwrap();
+    state.adjust_selected_option(1, &registry).unwrap();
 
     assert_eq!(
         state.scene.instances[0]
@@ -820,13 +897,38 @@ fn tui_state_applies_descriptor_integer_steps() {
 }
 
 #[test]
+fn tui_shift_right_accelerates_numeric_adjustments() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.select_option_by_name("stars").unwrap();
+
+    let shift_right = KeyEvent {
+        code: KeyCode::Right,
+        modifiers: KeyModifiers::SHIFT,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
+
+    ascii_animation::tui::handle_tui_key(&mut state, shift_right, &registry).unwrap();
+
+    assert_eq!(
+        state.scene.instances[0]
+            .options
+            .get("stars")
+            .unwrap()
+            .as_cli_value(),
+        "1100"
+    );
+}
+
+#[test]
 fn tui_state_clamps_integer_option_to_descriptor_bounds() {
     let registry = build_default_registry();
     let mut state = TuiState::default_with_registry(&registry).unwrap();
     state.select_option_by_name("arms").unwrap();
 
     for _ in 0..10 {
-        state.adjust_selected_option(-1).unwrap();
+        state.adjust_selected_option(-1, &registry).unwrap();
     }
 
     assert_eq!(
@@ -846,7 +948,7 @@ fn tui_state_clamps_float_option_to_descriptor_bounds() {
     state.select_option_by_name("noise").unwrap();
 
     for _ in 0..100 {
-        state.adjust_selected_option(1).unwrap();
+        state.adjust_selected_option(1, &registry).unwrap();
     }
 
     assert_eq!(
@@ -954,13 +1056,13 @@ fn tui_state_can_edit_custom_placement_fields() {
         .unwrap();
 
     state.select_option_by_name("placement-x").unwrap();
-    state.adjust_selected_option(3).unwrap();
+    state.adjust_selected_option(3, &registry).unwrap();
     state.select_option_by_name("placement-y").unwrap();
-    state.adjust_selected_option(-10).unwrap();
+    state.adjust_selected_option(-10, &registry).unwrap();
     state.select_option_by_name("placement-width").unwrap();
-    state.adjust_selected_option(-25).unwrap();
+    state.adjust_selected_option(-25, &registry).unwrap();
     state.select_option_by_name("placement-height").unwrap();
-    state.adjust_selected_option(5).unwrap();
+    state.adjust_selected_option(5, &registry).unwrap();
 
     assert_eq!(
         state.selected_instance().placement,

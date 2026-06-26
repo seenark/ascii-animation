@@ -1,7 +1,7 @@
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::io;
 use std::time::{Duration, Instant};
-
 use crossterm::cursor::Show;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
@@ -56,6 +56,13 @@ const CUSTOM_Y_OPTION: &str = "placement-y";
 const CUSTOM_WIDTH_OPTION: &str = "placement-width";
 const CUSTOM_HEIGHT_OPTION: &str = "placement-height";
 
+
+pub fn format_tui_option_value(value: &OptionValue) -> String {
+    match value {
+        OptionValue::Float(value) => format!("{value:.2}"),
+        other => other.as_cli_value(),
+    }
+}
 impl TuiState {
     pub fn default_with_registry(registry: &PresetRegistry) -> Result<Self> {
         let mut state = Self {
@@ -317,6 +324,10 @@ impl TuiState {
         Ok(())
     }
 
+    pub fn visible_option_names(&self) -> &[String] {
+        &self.option_names
+    }
+
     pub fn selected_option_is_text(&self) -> bool {
         matches!(
             self.option_kinds.get(self.selected_option),
@@ -410,7 +421,7 @@ impl TuiState {
         }
     }
 
-    pub fn adjust_selected_option(&mut self, delta: i32) -> Result<()> {
+    pub fn adjust_selected_option(&mut self, delta: i32, registry: &PresetRegistry) -> Result<()> {
         if self.option_names.is_empty() {
             return Ok(());
         }
@@ -426,6 +437,10 @@ impl TuiState {
             }
         }
 
+        let affects_visibility = matches!(
+            option_name.as_str(),
+            "text-effect" | "text-color-mode" | "text-overflow"
+        );
         let instance = self.selected_instance_mut();
         let current = instance.options.get(&option_name).cloned().ok_or_else(|| {
             AsciiAnimError::UnknownOption {
@@ -446,7 +461,13 @@ impl TuiState {
             }
             (_, value) => value,
         };
-        instance.options.insert(option_name, next);
+        instance.options.insert(option_name.clone(), next);
+        if affects_visibility {
+            self.sync_selected_options(registry)?;
+            if self.option_names.iter().any(|name| name == &option_name) {
+                self.select_option_by_name(&option_name)?;
+            }
+        }
         Ok(())
     }
 
@@ -461,6 +482,9 @@ impl TuiState {
         let (mut option_names, mut option_kinds): (Vec<_>, Vec<_>) = descriptor
             .options()
             .iter()
+            .filter(|option| {
+                preset != "text-art" || text_art_option_visible(option.name(), &validated)
+            })
             .map(|option| (option.name().to_string(), option.kind().clone()))
             .unzip();
         if matches!(self.selected_instance().placement, Placement::Custom { .. }) {
@@ -600,11 +624,11 @@ pub fn handle_tui_key(
             Ok(TuiAction::Continue)
         }
         KeyCode::Right => {
-            state.adjust_selected_option(1)?;
+            state.adjust_selected_option(adjustment_delta(state, &key, 1), registry)?;
             Ok(TuiAction::Continue)
         }
         KeyCode::Left => {
-            state.adjust_selected_option(-1)?;
+            state.adjust_selected_option(adjustment_delta(state, &key, -1), registry)?;
             Ok(TuiAction::Continue)
         }
         KeyCode::Char('a') => {
@@ -684,7 +708,7 @@ fn run_loop(
                 let instance = state.selected_instance();
                 let mut lines = vec![
                     Line::from(
-                        "Controls: Tab/Shift-Tab instance, ↑/↓ option, ←/→ adjust, Enter edit text",
+                        "Controls: Tab/Shift-Tab instance, ↑/↓ option, ←/→ adjust, Shift+←/→ fast, Enter edit text",
                     ),
                     Line::from("a add, d delete, p/P preset, m/M placement, l/L layer, [/ ] z"),
                     Line::from("s save, c copy command, q quit"),
@@ -735,7 +759,7 @@ fn run_loop(
                         .get(name)
                         .cloned()
                         .or_else(|| custom_placement_option_value(&instance.placement, name))
-                        .map(|value| value.as_cli_value())
+                        .map(|value| format_tui_option_value(&value))
                         .unwrap_or_default();
                     lines.push(Line::from(format!("{} {} = {}", marker, name, value)));
                 }
@@ -846,6 +870,24 @@ fn custom_placement_option_value(placement: &Placement, name: &str) -> Option<Op
     }
 }
 
+fn adjustment_delta(state: &TuiState, key: &KeyEvent, delta: i32) -> i32 {
+    if !key.modifiers.contains(KeyModifiers::SHIFT) || state.option_names.is_empty() {
+        return delta;
+    }
+
+    let option_name = state.option_names[state.selected_option].as_str();
+    match state.option_kinds[state.selected_option] {
+        OptionKind::Int { .. } | OptionKind::Float { .. } => delta * 10,
+        _ if matches!(
+            option_name,
+            CUSTOM_X_OPTION | CUSTOM_Y_OPTION | CUSTOM_WIDTH_OPTION | CUSTOM_HEIGHT_OPTION
+        ) =>
+        {
+            delta * 10
+        }
+        _ => delta,
+    }
+}
 fn adjust_custom_placement(placement: &mut Placement, name: &str, delta: i32) -> bool {
     let Placement::Custom {
         x,
@@ -867,6 +909,67 @@ fn adjust_custom_placement(placement: &mut Placement, name: &str, delta: i32) ->
         _ => return false,
     }
     true
+}
+
+fn text_art_option_visible(name: &str, values: &BTreeMap<String, OptionValue>) -> bool {
+    match name {
+        "text"
+        | "text-overflow"
+        | "text-font"
+        | "text-palette"
+        | "text-effect"
+        | "text-color-mode"
+        | "text-bg"
+        | "text-bright"
+        | "text-voffset"
+        | "text-drop-shadow"
+        | "text-border"
+        | "text-glow"
+        | "text-reflection"
+        | "text-particles"
+        | "text-mirror" => true,
+        "text-color-direction" => matches!(
+            option_choice(values, "text-color-mode"),
+            Some("gradient-h" | "gradient-v" | "wave-color")
+        ),
+        "text-speed" => {
+            option_choice(values, "text-overflow") == Some("slide")
+                || option_choice(values, "text-color-mode") == Some("wave-color")
+                || matches!(
+                    option_choice(values, "text-effect"),
+                    Some(
+                        "wave"
+                            | "pulse"
+                            | "scan"
+                            | "bounce"
+                            | "matrix"
+                            | "dissolve"
+                            | "typewriter"
+                            | "strobe"
+                            | "rain"
+                    )
+                )
+        }
+        "text-hold-visible-seconds" | "text-hold-hidden-seconds" => matches!(
+            option_choice(values, "text-effect"),
+            Some("dissolve" | "typewriter")
+        ),
+        "text-typewriter-loop" => option_choice(values, "text-effect") == Some("typewriter"),
+        "text-amp" => matches!(
+            option_choice(values, "text-effect"),
+            Some("wave" | "bounce" | "fire" | "rain")
+        ),
+        "text-freq" => option_choice(values, "text-effect") == Some("wave"),
+        "text-glitch" => option_choice(values, "text-effect") == Some("glitch"),
+        _ => true,
+    }
+}
+
+fn option_choice<'a>(values: &'a BTreeMap<String, OptionValue>, name: &str) -> Option<&'a str> {
+    match values.get(name) {
+        Some(OptionValue::Choice(value)) => Some(value.as_str()),
+        _ => None,
+    }
 }
 
 fn layer_label(layer: Layer) -> &'static str {

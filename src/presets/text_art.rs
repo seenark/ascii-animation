@@ -28,9 +28,9 @@ const PALETTE_COSMIC: [Rgb; 7] = [
     Rgb::new(26, 51, 153),
     Rgb::new(34, 68, 204),
     Rgb::new(68, 136, 255),
-    Rgb::new(102, 170, 255),
-    Rgb::new(153, 204, 255),
-    Rgb::new(204, 238, 255),
+    Rgb::new(136, 204, 255),
+    Rgb::new(204, 170, 255),
+    Rgb::new(255, 136, 255),
     Rgb::new(255, 255, 255),
 ];
 const PALETTE_FIRE: [Rgb; 7] = [
@@ -39,52 +39,52 @@ const PALETTE_FIRE: [Rgb; 7] = [
     Rgb::new(238, 68, 0),
     Rgb::new(255, 136, 0),
     Rgb::new(255, 187, 0),
-    Rgb::new(255, 238, 68),
+    Rgb::new(255, 221, 136),
     Rgb::new(255, 255, 255),
 ];
 const PALETTE_NEON: [Rgb; 7] = [
     Rgb::new(0, 51, 0),
     Rgb::new(0, 102, 0),
     Rgb::new(0, 170, 0),
-    Rgb::new(0, 221, 0),
-    Rgb::new(0, 255, 68),
-    Rgb::new(136, 255, 170),
-    Rgb::new(204, 255, 221),
+    Rgb::new(0, 255, 85),
+    Rgb::new(0, 255, 170),
+    Rgb::new(136, 255, 221),
+    Rgb::new(255, 255, 255),
 ];
 const PALETTE_GOLD: [Rgb; 7] = [
     Rgb::new(58, 32, 0),
     Rgb::new(122, 68, 0),
     Rgb::new(204, 136, 0),
     Rgb::new(255, 187, 0),
-    Rgb::new(255, 221, 68),
-    Rgb::new(255, 238, 153),
+    Rgb::new(255, 221, 85),
+    Rgb::new(255, 238, 170),
     Rgb::new(255, 255, 255),
 ];
 const PALETTE_ICE: [Rgb; 7] = [
     Rgb::new(0, 17, 51),
     Rgb::new(0, 34, 102),
     Rgb::new(17, 85, 170),
-    Rgb::new(68, 136, 221),
-    Rgb::new(136, 187, 255),
-    Rgb::new(204, 221, 255),
+    Rgb::new(34, 136, 238),
+    Rgb::new(102, 204, 255),
+    Rgb::new(187, 238, 255),
     Rgb::new(255, 255, 255),
 ];
 const PALETTE_RAINBOW: [Rgb; 7] = [
     Rgb::new(255, 0, 0),
     Rgb::new(255, 136, 0),
     Rgb::new(255, 255, 0),
-    Rgb::new(0, 255, 0),
+    Rgb::new(0, 204, 0),
     Rgb::new(0, 136, 255),
-    Rgb::new(136, 0, 255),
-    Rgb::new(255, 0, 170),
+    Rgb::new(102, 0, 255),
+    Rgb::new(255, 0, 204),
 ];
 const PALETTE_PLASMA: [Rgb; 7] = [
     Rgb::new(34, 0, 68),
     Rgb::new(102, 0, 136),
     Rgb::new(170, 0, 204),
-    Rgb::new(238, 68, 255),
-    Rgb::new(255, 136, 255),
-    Rgb::new(255, 204, 255),
+    Rgb::new(238, 34, 170),
+    Rgb::new(255, 85, 136),
+    Rgb::new(255, 170, 102),
     Rgb::new(255, 255, 255),
 ];
 const PALETTE_MONO: [Rgb; 7] = [
@@ -100,22 +100,156 @@ const PALETTE_RED: [Rgb; 7] = [
     Rgb::new(34, 0, 0),
     Rgb::new(85, 0, 0),
     Rgb::new(136, 0, 0),
-    Rgb::new(204, 0, 0),
-    Rgb::new(255, 34, 34),
-    Rgb::new(255, 102, 102),
-    Rgb::new(255, 170, 170),
+    Rgb::new(187, 0, 0),
+    Rgb::new(238, 34, 34),
+    Rgb::new(255, 136, 136),
+    Rgb::new(255, 255, 255),
 ];
 const PALETTE_CANDY: [Rgb; 7] = [
     Rgb::new(255, 102, 170),
     Rgb::new(255, 153, 204),
     Rgb::new(255, 187, 221),
-    Rgb::new(170, 221, 255),
-    Rgb::new(136, 204, 255),
-    Rgb::new(255, 238, 136),
+    Rgb::new(255, 221, 238),
+    Rgb::new(204, 221, 255),
+    Rgb::new(153, 204, 255),
     Rgb::new(255, 255, 255),
 ];
-
-static PARSED_FIGLET_FONTS: OnceLock<Vec<(&'static str, FIGlet)>> = OnceLock::new();
+const PALETTE_CATPPUCCIN_LATTE: [Rgb; 14] = [
+    Rgb::new(220, 138, 120),
+    Rgb::new(221, 120, 120),
+    Rgb::new(234, 118, 203),
+    Rgb::new(136, 57, 239),
+    Rgb::new(210, 15, 57),
+    Rgb::new(230, 69, 83),
+    Rgb::new(254, 100, 11),
+    Rgb::new(223, 142, 29),
+    Rgb::new(64, 160, 43),
+    Rgb::new(23, 146, 153),
+    Rgb::new(4, 165, 229),
+    Rgb::new(32, 159, 181),
+    Rgb::new(30, 102, 245),
+    Rgb::new(114, 135, 253),
+];
+const PALETTE_CATPPUCCIN_FRAPPE: [Rgb; 14] = [
+    Rgb::new(242, 213, 207),
+    Rgb::new(238, 190, 190),
+    Rgb::new(244, 184, 228),
+    Rgb::new(202, 158, 230),
+    Rgb::new(231, 130, 132),
+    Rgb::new(234, 153, 156),
+    Rgb::new(239, 159, 118),
+    Rgb::new(229, 200, 144),
+    Rgb::new(166, 209, 137),
+    Rgb::new(129, 200, 190),
+    Rgb::new(153, 209, 219),
+    Rgb::new(133, 193, 220),
+    Rgb::new(140, 170, 238),
+    Rgb::new(186, 187, 241),
+];
+const PALETTE_CATPPUCCIN_MACCHIATO: [Rgb; 14] = [
+    Rgb::new(244, 219, 214),
+    Rgb::new(240, 198, 198),
+    Rgb::new(245, 189, 230),
+    Rgb::new(198, 160, 246),
+    Rgb::new(237, 135, 150),
+    Rgb::new(238, 153, 160),
+    Rgb::new(245, 169, 127),
+    Rgb::new(238, 212, 159),
+    Rgb::new(166, 218, 149),
+    Rgb::new(139, 213, 202),
+    Rgb::new(145, 215, 227),
+    Rgb::new(125, 196, 228),
+    Rgb::new(138, 173, 244),
+    Rgb::new(183, 189, 248),
+];
+const PALETTE_CATPPUCCIN_MOCHA: [Rgb; 14] = [
+    Rgb::new(245, 224, 220),
+    Rgb::new(242, 205, 205),
+    Rgb::new(245, 194, 231),
+    Rgb::new(203, 166, 247),
+    Rgb::new(243, 139, 168),
+    Rgb::new(235, 160, 172),
+    Rgb::new(250, 179, 135),
+    Rgb::new(249, 226, 175),
+    Rgb::new(166, 227, 161),
+    Rgb::new(148, 226, 213),
+    Rgb::new(137, 220, 235),
+    Rgb::new(116, 199, 236),
+    Rgb::new(137, 180, 250),
+    Rgb::new(180, 190, 254),
+];
+const PALETTE_SUNSET: [Rgb; 7] = [
+    Rgb::new(45, 21, 87),
+    Rgb::new(95, 39, 120),
+    Rgb::new(186, 58, 111),
+    Rgb::new(255, 111, 97),
+    Rgb::new(255, 154, 86),
+    Rgb::new(255, 206, 115),
+    Rgb::new(255, 244, 214),
+];
+const PALETTE_OCEAN: [Rgb; 7] = [
+    Rgb::new(0, 31, 63),
+    Rgb::new(0, 76, 153),
+    Rgb::new(0, 121, 184),
+    Rgb::new(0, 180, 216),
+    Rgb::new(72, 202, 228),
+    Rgb::new(144, 224, 239),
+    Rgb::new(202, 240, 248),
+];
+const PALETTE_FOREST: [Rgb; 7] = [
+    Rgb::new(8, 28, 21),
+    Rgb::new(27, 67, 50),
+    Rgb::new(45, 106, 79),
+    Rgb::new(64, 145, 108),
+    Rgb::new(116, 198, 157),
+    Rgb::new(183, 228, 199),
+    Rgb::new(216, 243, 220),
+];
+const PALETTE_ROSE: [Rgb; 7] = [
+    Rgb::new(89, 13, 34),
+    Rgb::new(128, 15, 47),
+    Rgb::new(164, 19, 60),
+    Rgb::new(201, 24, 74),
+    Rgb::new(255, 77, 109),
+    Rgb::new(255, 143, 163),
+    Rgb::new(255, 204, 213),
+];
+const PALETTE_CYBERPUNK: [Rgb; 7] = [
+    Rgb::new(10, 0, 26),
+    Rgb::new(49, 0, 98),
+    Rgb::new(123, 44, 191),
+    Rgb::new(255, 0, 110),
+    Rgb::new(255, 190, 11),
+    Rgb::new(58, 134, 255),
+    Rgb::new(131, 56, 236),
+];
+const PALETTE_MINT: [Rgb; 7] = [
+    Rgb::new(0, 48, 40),
+    Rgb::new(0, 95, 87),
+    Rgb::new(0, 137, 123),
+    Rgb::new(0, 191, 166),
+    Rgb::new(72, 219, 188),
+    Rgb::new(173, 252, 234),
+    Rgb::new(232, 255, 248),
+];
+const PALETTE_LAVENDER: [Rgb; 7] = [
+    Rgb::new(35, 25, 66),
+    Rgb::new(74, 78, 105),
+    Rgb::new(112, 101, 145),
+    Rgb::new(154, 140, 152),
+    Rgb::new(201, 173, 167),
+    Rgb::new(222, 196, 207),
+    Rgb::new(242, 233, 228),
+];
+const PALETTE_DRACULA: [Rgb; 7] = [
+    Rgb::new(40, 42, 54),
+    Rgb::new(68, 71, 90),
+    Rgb::new(80, 250, 123),
+    Rgb::new(139, 233, 253),
+    Rgb::new(189, 147, 249),
+    Rgb::new(255, 121, 198),
+    Rgb::new(255, 184, 108),
+];
 
 #[derive(Debug, Clone)]
 struct TextArtOptions {
@@ -125,8 +259,12 @@ struct TextArtOptions {
     palette: String,
     effect: String,
     color_mode: String,
+    color_direction: String,
     bg: String,
     speed: f64,
+    hold_visible_seconds: f64,
+    hold_hidden_seconds: f64,
+    typewriter_loop: bool,
     amp: f64,
     freq: f64,
     glitch: f64,
@@ -235,8 +373,28 @@ pub fn descriptor() -> PresetDescriptor {
                 "Palette",
                 "cosmic",
                 vec![
-                    "cosmic", "fire", "neon", "gold", "ice", "rainbow", "plasma", "mono", "red",
+                    "cosmic",
+                    "fire",
+                    "neon",
+                    "gold",
+                    "ice",
+                    "rainbow",
+                    "plasma",
+                    "mono",
+                    "red",
                     "candy",
+                    "catppuccin-latte",
+                    "catppuccin-frappe",
+                    "catppuccin-macchiato",
+                    "catppuccin-mocha",
+                    "sunset",
+                    "ocean",
+                    "forest",
+                    "rose",
+                    "cyberpunk",
+                    "mint",
+                    "lavender",
+                    "dracula",
                 ],
                 false,
             ),
@@ -276,6 +434,13 @@ pub fn descriptor() -> PresetDescriptor {
                 false,
             ),
             OptionDescriptor::choice(
+                "text-color-direction",
+                "Color Direction",
+                "forward",
+                vec!["forward", "reverse"],
+                false,
+            ),
+            OptionDescriptor::choice(
                 "text-bg",
                 "Background",
                 "stars",
@@ -283,6 +448,23 @@ pub fn descriptor() -> PresetDescriptor {
                 true,
             ),
             OptionDescriptor::float("text-speed", "Speed", 1.5, 0.1, 5.0, false),
+            OptionDescriptor::float(
+                "text-hold-visible-seconds",
+                "Hold Visible",
+                0.0,
+                0.0,
+                10.0,
+                false,
+            ),
+            OptionDescriptor::float(
+                "text-hold-hidden-seconds",
+                "Hold Hidden",
+                0.0,
+                0.0,
+                10.0,
+                false,
+            ),
+            OptionDescriptor::bool("text-typewriter-loop", "Loop Typing", false, false),
             OptionDescriptor::float("text-amp", "Wave Amp", 2.5, 0.0, 8.0, false),
             OptionDescriptor::float("text-freq", "Wave Freq", 1.0, 0.1, 4.0, false),
             OptionDescriptor::float("text-glitch", "Glitch Amt", 0.15, 0.0, 1.0, false),
@@ -369,6 +551,7 @@ impl AnimationRenderer for TextArtRenderer {
                     scaled_row,
                     scaled_width,
                     scaled_height,
+                    bitmap.visible_chars,
                     context.elapsed_seconds,
                     self.seed,
                     frame_tick,
@@ -485,8 +668,28 @@ impl TextArtOptions {
                 values,
                 "text-palette",
                 &[
-                    "cosmic", "fire", "neon", "gold", "ice", "rainbow", "plasma", "mono", "red",
+                    "cosmic",
+                    "fire",
+                    "neon",
+                    "gold",
+                    "ice",
+                    "rainbow",
+                    "plasma",
+                    "mono",
+                    "red",
                     "candy",
+                    "catppuccin-latte",
+                    "catppuccin-frappe",
+                    "catppuccin-macchiato",
+                    "catppuccin-mocha",
+                    "sunset",
+                    "ocean",
+                    "forest",
+                    "rose",
+                    "cyberpunk",
+                    "mint",
+                    "lavender",
+                    "dracula",
                 ],
             )?,
             effect: get_choice(
@@ -520,12 +723,20 @@ impl TextArtOptions {
                     "random",
                 ],
             )?,
+            color_direction: get_choice(
+                values,
+                "text-color-direction",
+                &["forward", "reverse"],
+            )?,
             bg: get_choice(
                 values,
                 "text-bg",
                 &["none", "stars", "grid", "rain", "noise", "scanlines"],
             )?,
             speed: get_float(values, "text-speed")?,
+            hold_visible_seconds: get_float(values, "text-hold-visible-seconds")?,
+            hold_hidden_seconds: get_float(values, "text-hold-hidden-seconds")?,
+            typewriter_loop: get_bool(values, "text-typewriter-loop")?,
             amp: get_float(values, "text-amp")?,
             freq: get_float(values, "text-freq")?,
             glitch: get_float(values, "text-glitch")?,
@@ -559,6 +770,8 @@ impl TextBitmap {
         self.cells[y * self.width + x].as_ref()
     }
 }
+
+static PARSED_FIGLET_FONTS: OnceLock<Vec<(&'static str, FIGlet)>> = OnceLock::new();
 
 fn figlet_font_names() -> Vec<&'static str> {
     embedded_figlet_fonts::FIGLET_FONTS
@@ -605,6 +818,30 @@ fn figlet_rows(font: &FIGlet, text: &str) -> Option<Vec<Vec<char>>> {
     Some(rows)
 }
 
+fn figlet_column_char_indices(font: &FIGlet, text: &str, width: usize) -> Vec<usize> {
+    let mut column_char_indices = vec![0; width];
+    let mut visible_char_index = 0usize;
+    let mut previous_width = 0usize;
+    let mut prefix = String::new();
+
+    for ch in text.chars() {
+        prefix.push(ch);
+        let rendered_width = figlet_rows(font, &prefix)
+            .map(|rows| rows.iter().map(|row| row.len()).max().unwrap_or(0))
+            .unwrap_or(0)
+            .min(width);
+        if !ch.is_whitespace() {
+            for column in previous_width..rendered_width {
+                column_char_indices[column] = visible_char_index;
+            }
+            visible_char_index += 1;
+        }
+        previous_width = rendered_width;
+    }
+
+    column_char_indices
+}
+
 fn text_bitmap_width(options: &TextArtOptions) -> usize {
     figlet_font(&options.font)
         .and_then(|font| figlet_rows(font, &options.text))
@@ -633,6 +870,7 @@ fn build_figlet_text_bitmap(options: &TextArtOptions, font: &FIGlet) -> TextBitm
         .filter(|ch| !ch.is_whitespace())
         .count()
         .max(1);
+    let column_char_indices = figlet_column_char_indices(font, &options.text, width);
     let mut min_x = bitmap.width;
     let mut max_x = 0usize;
     let mut min_y = bitmap.height;
@@ -652,7 +890,7 @@ fn build_figlet_text_bitmap(options: &TextArtOptions, font: &FIGlet) -> TextBitm
                 row_index,
                 BitmapCell {
                     ch: *ch,
-                    char_index: 0,
+                    char_index: column_char_indices[col_index],
                     rel_x: col_index as f64 / (width.saturating_sub(1).max(1) as f64),
                     rel_y: row_index as f64 / (height.saturating_sub(1).max(1) as f64),
                     gradient_x: 0.0,
@@ -941,11 +1179,15 @@ fn color_position(
 ) -> f64 {
     match options.color_mode.as_str() {
         "solid" => 0.85,
-        "gradient-h" => cell.gradient_x,
-        "gradient-v" => cell.gradient_y,
+        "gradient-h" => apply_color_direction(cell.gradient_x, &options.color_direction),
+        "gradient-v" => apply_color_direction(cell.gradient_y, &options.color_direction),
         "per-char" => cell.char_index as f64 / visible_text_len.saturating_sub(1).max(1) as f64,
         "wave-color" => {
-            ((scaled_col as f64 * 0.3 + elapsed_seconds * options.speed).sin() + 1.0) / 2.0
+            if options.color_direction == "reverse" {
+                ((scaled_col as f64 * 0.3 - elapsed_seconds * options.speed).sin() + 1.0) / 2.0
+            } else {
+                ((scaled_col as f64 * 0.3 + elapsed_seconds * options.speed).sin() + 1.0) / 2.0
+            }
         }
         "random" => unit_hash(seed, scaled_col as u64, scaled_row as u64, frame_tick, 41),
         _ => 0.85,
@@ -959,6 +1201,7 @@ fn anim_offset(
     scaled_row: i32,
     scaled_width: i32,
     scaled_height: i32,
+    visible_chars: usize,
     elapsed_seconds: f64,
     seed: u64,
     frame_tick: u64,
@@ -1023,13 +1266,27 @@ fn anim_offset(
             sample.alpha = 0.45 + 0.55 * (1.0 - cell.rel_y * 0.6);
         }
         "dissolve" => {
-            let threshold = ((elapsed_seconds * speed * 0.8).sin() + 1.0) / 2.0;
-            sample.alpha = if unit_hash(seed, scaled_col as u64, scaled_row as u64, frame_tick, 13)
-                < threshold
-            {
+            let transition_duration = 2.0 / options.speed.max(0.1);
+            let cycle_duration = options.hold_visible_seconds
+                + transition_duration
+                + options.hold_hidden_seconds
+                + transition_duration;
+            let cycle_time = elapsed_seconds.rem_euclid(cycle_duration.max(0.001));
+            let rank = unit_hash(seed, scaled_col as u64, scaled_row as u64, 0, 13);
+            let visible_hold_end = options.hold_visible_seconds;
+            let dissolve_out_end = visible_hold_end + transition_duration;
+            let hidden_hold_end = dissolve_out_end + options.hold_hidden_seconds;
+
+            sample.alpha = if cycle_time < visible_hold_end {
                 1.0
-            } else {
+            } else if cycle_time < dissolve_out_end {
+                let progress = (cycle_time - visible_hold_end) / transition_duration;
+                if rank < progress { 0.0 } else { 1.0 }
+            } else if cycle_time < hidden_hold_end {
                 0.0
+            } else {
+                let progress = (cycle_time - hidden_hold_end) / transition_duration;
+                if rank < 1.0 - progress { 0.0 } else { 1.0 }
             };
         }
         "strobe" => {
@@ -1044,10 +1301,33 @@ fn anim_offset(
                 0.7 + 0.3 * unit_hash(seed, scaled_col as u64, scaled_row as u64, frame_tick, 14);
         }
         "typewriter" => {
-            let reveal = (elapsed_seconds * speed * 3.0).floor() as usize;
+            let chars_per_second = options.speed * 3.0;
+            let mut typing = true;
+            let reveal = if options.typewriter_loop {
+                let typing_duration = visible_chars as f64 / chars_per_second.max(0.1);
+                let cycle_duration =
+                    options.hold_hidden_seconds + typing_duration + options.hold_visible_seconds;
+                let cycle_time = elapsed_seconds.rem_euclid(cycle_duration.max(0.001));
+
+                if cycle_time < options.hold_hidden_seconds {
+                    sample.alpha = 0.0;
+                    return sample;
+                }
+                if cycle_time >= options.hold_hidden_seconds + typing_duration {
+                    typing = false;
+                    visible_chars.saturating_sub(1)
+                } else {
+                    let typing_elapsed = cycle_time - options.hold_hidden_seconds;
+                    (typing_elapsed * chars_per_second).floor() as usize
+                }
+            } else {
+                (elapsed_seconds * chars_per_second).floor() as usize
+            };
+
             if cell.char_index > reveal {
                 sample.alpha = 0.0;
-            } else if cell.char_index == reveal
+            } else if typing
+                && cell.char_index == reveal
                 && unit_hash(seed, frame_tick, cell.char_index as u64, 0, 15) > 0.5
             {
                 sample.glyph =
@@ -1069,6 +1349,10 @@ fn anim_offset(
         sample.dx = 0.0;
     }
     sample
+}
+
+fn apply_color_direction(t: f64, direction: &str) -> f64 {
+    if direction == "reverse" { 1.0 - t } else { t }
 }
 
 fn palette_color(t01: f64, palette_name: &str, bright: f64) -> Rgb {
@@ -1143,6 +1427,18 @@ fn palette(name: &str) -> &'static [Rgb] {
         "mono" => &PALETTE_MONO,
         "red" => &PALETTE_RED,
         "candy" => &PALETTE_CANDY,
+        "catppuccin-latte" => &PALETTE_CATPPUCCIN_LATTE,
+        "catppuccin-frappe" => &PALETTE_CATPPUCCIN_FRAPPE,
+        "catppuccin-macchiato" => &PALETTE_CATPPUCCIN_MACCHIATO,
+        "catppuccin-mocha" => &PALETTE_CATPPUCCIN_MOCHA,
+        "sunset" => &PALETTE_SUNSET,
+        "ocean" => &PALETTE_OCEAN,
+        "forest" => &PALETTE_FOREST,
+        "rose" => &PALETTE_ROSE,
+        "cyberpunk" => &PALETTE_CYBERPUNK,
+        "mint" => &PALETTE_MINT,
+        "lavender" => &PALETTE_LAVENDER,
+        "dracula" => &PALETTE_DRACULA,
         _ => &PALETTE_COSMIC,
     }
 }

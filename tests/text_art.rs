@@ -112,6 +112,10 @@ fn count_char(frame: &FrameBuffer, target: char) -> usize {
     frame.cells().iter().filter(|cell| cell.ch == target).count()
 }
 
+fn count_non_space(frame: &FrameBuffer) -> usize {
+    frame.cells().iter().filter(|cell| cell.ch != ' ').count()
+}
+
 #[test]
 fn text_art_descriptor_has_required_options_and_defaults() {
     let descriptor = text_art::descriptor();
@@ -124,6 +128,15 @@ fn text_art_descriptor_has_required_options_and_defaults() {
     let font_choices = match font_option.kind() {
         ascii_animation::presets::OptionKind::Choice { choices } => choices,
         other => panic!("text-font must be choice option, got {other:?}"),
+    };
+    let text_palette_option = descriptor
+        .options()
+        .iter()
+        .find(|option| option.name() == "text-palette")
+        .unwrap();
+    let text_palette_choices = match text_palette_option.kind() {
+        ascii_animation::presets::OptionKind::Choice { choices } => choices,
+        other => panic!("text-palette must be choice option, got {other:?}"),
     };
 
     assert_eq!(descriptor.name(), "text-art");
@@ -146,8 +159,33 @@ fn text_art_descriptor_has_required_options_and_defaults() {
         defaults.get("text-color-mode").unwrap().as_cli_value(),
         "gradient-h"
     );
+    assert_eq!(
+        defaults
+            .get("text-color-direction")
+            .unwrap()
+            .as_cli_value(),
+        "forward"
+    );
     assert_eq!(defaults.get("text-bg").unwrap().as_cli_value(), "stars");
     assert_eq!(defaults.get("text-speed").unwrap().as_cli_value(), "1.5");
+    assert_eq!(
+        defaults
+            .get("text-hold-visible-seconds")
+            .unwrap()
+            .as_cli_value(),
+        "0"
+    );
+    assert_eq!(
+        defaults
+            .get("text-hold-hidden-seconds")
+            .unwrap()
+            .as_cli_value(),
+        "0"
+    );
+    assert_eq!(
+        defaults.get("text-typewriter-loop").unwrap().as_cli_value(),
+        "false"
+    );
     assert_eq!(defaults.get("text-amp").unwrap().as_cli_value(), "2.5");
     assert_eq!(defaults.get("text-freq").unwrap().as_cli_value(), "1");
     assert_eq!(defaults.get("text-glitch").unwrap().as_cli_value(), "0.15");
@@ -168,6 +206,51 @@ fn text_art_descriptor_has_required_options_and_defaults() {
         "false"
     );
     assert_eq!(defaults.get("text-mirror").unwrap().as_cli_value(), "false");
+    assert_eq!(
+        text_palette_choices,
+        &[
+            "cosmic".to_string(),
+            "fire".to_string(),
+            "neon".to_string(),
+            "gold".to_string(),
+            "ice".to_string(),
+            "rainbow".to_string(),
+            "plasma".to_string(),
+            "mono".to_string(),
+            "red".to_string(),
+            "candy".to_string(),
+            "catppuccin-latte".to_string(),
+            "catppuccin-frappe".to_string(),
+            "catppuccin-macchiato".to_string(),
+            "catppuccin-mocha".to_string(),
+            "sunset".to_string(),
+            "ocean".to_string(),
+            "forest".to_string(),
+            "rose".to_string(),
+            "cyberpunk".to_string(),
+            "mint".to_string(),
+            "lavender".to_string(),
+            "dracula".to_string(),
+        ]
+    );
+    assert!(
+        descriptor
+            .options()
+            .iter()
+            .any(|option| option.name() == "text-hold-visible-seconds")
+    );
+    assert!(
+        descriptor
+            .options()
+            .iter()
+            .any(|option| option.name() == "text-hold-hidden-seconds")
+    );
+    assert!(
+        descriptor
+            .options()
+            .iter()
+            .any(|option| option.name() == "text-typewriter-loop")
+    );
     assert!(font_choices.windows(2).all(|w| {
         w[0].to_ascii_lowercase() <= w[1].to_ascii_lowercase()
     }));
@@ -274,6 +357,148 @@ fn text_art_none_effect_keeps_bitmap_static_even_with_motion_options() {
 }
 
 #[test]
+fn text_art_dissolve_holds_visible_then_hidden_before_reappearing() {
+    let mut options = clean_text_options("I");
+    options.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("dissolve".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-border".to_string(), OptionValue::Bool(false));
+    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    options.insert("text-particles".to_string(), OptionValue::Bool(false));
+    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+    options.insert(
+        "text-hold-visible-seconds".to_string(),
+        OptionValue::Float(1.0),
+    );
+    options.insert(
+        "text-hold-hidden-seconds".to_string(),
+        OptionValue::Float(1.5),
+    );
+
+    let visible_hold = render_text_frame_at(&options, 15, 9, 0.5);
+    let hidden_hold_start = render_text_frame_at(&options, 15, 9, 3.1);
+    let hidden_hold_late = render_text_frame_at(&options, 15, 9, 4.4);
+    let dissolve_in = render_text_frame_at(&options, 15, 9, 5.4);
+
+    assert!(count_non_space(&visible_hold) > 0);
+    assert_eq!(count_non_space(&hidden_hold_start), 0);
+    assert_eq!(count_non_space(&hidden_hold_late), 0);
+    assert!(count_non_space(&dissolve_in) > 0);
+}
+
+#[test]
+fn text_art_typewriter_loop_waits_hidden_then_retypes_after_visible_hold() {
+    let mut options = clean_text_options("HI");
+    options.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("typewriter".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-border".to_string(), OptionValue::Bool(false));
+    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    options.insert("text-particles".to_string(), OptionValue::Bool(false));
+    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+    options.insert(
+        "text-hold-visible-seconds".to_string(),
+        OptionValue::Float(1.0),
+    );
+    options.insert(
+        "text-hold-hidden-seconds".to_string(),
+        OptionValue::Float(0.5),
+    );
+    options.insert(
+        "text-typewriter-loop".to_string(),
+        OptionValue::Bool(true),
+    );
+
+    let hidden_hold = render_text_frame_at(&options, 15, 9, 0.25);
+    let typing = render_text_frame_at(&options, 15, 9, 0.70);
+    let visible_hold = render_text_frame_at(&options, 15, 9, 1.40);
+    let reset_hidden = render_text_frame_at(&options, 15, 9, 2.30);
+
+    assert_eq!(count_non_space(&hidden_hold), 0);
+    assert!(count_non_space(&typing) > 0);
+    assert!(count_non_space(&visible_hold) > 0);
+    assert_eq!(count_non_space(&reset_hidden), 0);
+}
+
+#[test]
+fn text_art_typewriter_default_does_not_loop_after_reveal() {
+    let mut options = clean_text_options("HI");
+    options.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("typewriter".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-border".to_string(), OptionValue::Bool(false));
+    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    options.insert("text-particles".to_string(), OptionValue::Bool(false));
+    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+    options.insert(
+        "text-hold-visible-seconds".to_string(),
+        OptionValue::Float(0.2),
+    );
+    options.insert(
+        "text-hold-hidden-seconds".to_string(),
+        OptionValue::Float(0.2),
+    );
+    options.insert(
+        "text-typewriter-loop".to_string(),
+        OptionValue::Bool(false),
+    );
+
+    let frame = render_text_frame_at(&options, 15, 9, 5.0);
+
+    assert!(count_non_space(&frame) > 0);
+}
+
+#[test]
+fn text_art_typewriter_reveals_characters_progressively() {
+    let mut options = clean_text_options("HI");
+    options.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("typewriter".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-border".to_string(), OptionValue::Bool(false));
+    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    options.insert("text-particles".to_string(), OptionValue::Bool(false));
+    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    options.insert("text-speed".to_string(), OptionValue::Float(1.0));
+
+    let partial = render_text_frame_at(&options, 15, 9, 0.2);
+    let complete = render_text_frame_at(&options, 15, 9, 0.5);
+
+    assert!(count_non_space(&partial) > 0);
+    assert!(count_non_space(&partial) < count_non_space(&complete));
+}
+
+#[test]
 fn text_art_figlet_size_is_not_scaled() {
     let mut options = clean_text_options("A");
     options.insert("text-scale".to_string(), OptionValue::Float(2.0));
@@ -350,6 +575,249 @@ fn text_art_palette_uses_reference_seven_stop_fire_gradient() {
     let left = text_cells.first().unwrap();
     assert_eq!(left.1, Some(Rgb::new(85, 0, 0)));
     assert!(text_cells.iter().any(|(_, color)| *color == Some(Rgb::new(255, 255, 255))));
+}
+
+#[test]
+fn text_art_gradient_h_reverse_flips_palette_direction() {
+    let mut options = clean_text_options("I");
+    options.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("fire".to_string()),
+    );
+    options.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("gradient-h".to_string()),
+    );
+    options.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("reverse".to_string()),
+    );
+    let frame = render_text_frame_at(&options, 15, 9, 0.0);
+
+    let mut text_cells: Vec<(u16, Option<Rgb>)> = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .filter_map(|(x, y)| {
+            let cell = frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some((x, cell.color))
+        })
+        .collect();
+    text_cells.sort_by_key(|(x, _)| *x);
+
+    let left = text_cells.first().unwrap();
+    assert_eq!(left.1, Some(Rgb::new(255, 255, 255)));
+}
+
+#[test]
+fn text_art_gradient_v_reverse_flips_palette_direction() {
+    let mut options = clean_text_options("I");
+    options.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("fire".to_string()),
+    );
+    options.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("gradient-v".to_string()),
+    );
+    options.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("reverse".to_string()),
+    );
+    let frame = render_text_frame_at(&options, 15, 9, 0.0);
+
+    let mut text_cells: Vec<(u16, u16, Option<Rgb>)> = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .filter_map(|(x, y)| {
+            let cell = frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some((x, y, cell.color))
+        })
+        .collect();
+    text_cells.sort_by_key(|(x, y, _)| (*y, *x));
+
+    let top = text_cells.first().unwrap();
+    assert_eq!(top.2, Some(Rgb::new(255, 255, 255)));
+}
+
+#[test]
+fn text_art_wave_color_reverse_changes_motion_direction() {
+    let mut forward = clean_text_options("I");
+    forward.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("fire".to_string()),
+    );
+    forward.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("wave-color".to_string()),
+    );
+    forward.insert(
+        "text-effect".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    forward.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    forward.insert("text-glow".to_string(), OptionValue::Bool(false));
+    forward.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    forward.insert("text-border".to_string(), OptionValue::Bool(false));
+    forward.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    forward.insert("text-particles".to_string(), OptionValue::Bool(false));
+    forward.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    forward.insert("text-speed".to_string(), OptionValue::Float(1.0));
+    forward.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("forward".to_string()),
+    );
+
+    let mut reverse = forward.clone();
+    reverse.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("reverse".to_string()),
+    );
+
+    let forward_frame = render_text_frame_at(&forward, 15, 9, 0.5);
+    let reverse_frame = render_text_frame_at(&reverse, 15, 9, 0.5);
+
+    let forward_first = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .find_map(|(x, y)| {
+            let cell = forward_frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some(cell.color)
+        })
+        .unwrap();
+    let reverse_first = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .find_map(|(x, y)| {
+            let cell = reverse_frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some(cell.color)
+        })
+        .unwrap();
+
+    assert_ne!(forward_first, reverse_first);
+}
+
+#[test]
+fn text_art_catppuccin_mocha_palette_uses_official_accent_stops() {
+    let mut options = clean_text_options("I");
+    options.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("catppuccin-mocha".to_string()),
+    );
+    options.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("gradient-h".to_string()),
+    );
+    options.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("forward".to_string()),
+    );
+    let frame = render_text_frame_at(&options, 15, 9, 0.0);
+
+    let mut text_cells: Vec<(u16, Option<Rgb>)> = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .filter_map(|(x, y)| {
+            let cell = frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some((x, cell.color))
+        })
+        .collect();
+    text_cells.sort_by_key(|(x, _)| *x);
+
+    let left = text_cells.first().unwrap();
+    assert_eq!(left.1, Some(Rgb::new(245, 224, 220)));
+    assert!(
+        text_cells
+            .iter()
+            .any(|(_, color)| *color == Some(Rgb::new(180, 190, 254)))
+    );
+}
+
+#[test]
+fn text_art_sunset_palette_uses_curated_warm_gradient() {
+    let mut options = clean_text_options("I");
+    options.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("sunset".to_string()),
+    );
+    options.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("gradient-h".to_string()),
+    );
+    options.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("forward".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-border".to_string(), OptionValue::Bool(false));
+    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    options.insert("text-particles".to_string(), OptionValue::Bool(false));
+    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    let frame = render_text_frame_at(&options, 15, 9, 0.0);
+
+    let mut text_cells: Vec<(u16, Option<Rgb>)> = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .filter_map(|(x, y)| {
+            let cell = frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some((x, cell.color))
+        })
+        .collect();
+    text_cells.sort_by_key(|(x, _)| *x);
+
+    let left = text_cells.first().unwrap();
+    assert_eq!(left.1, Some(Rgb::new(45, 21, 87)));
+    assert!(
+        text_cells
+            .iter()
+            .any(|(_, color)| *color == Some(Rgb::new(255, 244, 214)))
+    );
+}
+
+#[test]
+fn text_art_dracula_palette_uses_popular_theme_accents() {
+    let mut options = clean_text_options("I");
+    options.insert(
+        "text-palette".to_string(),
+        OptionValue::Choice("dracula".to_string()),
+    );
+    options.insert(
+        "text-color-mode".to_string(),
+        OptionValue::Choice("gradient-h".to_string()),
+    );
+    options.insert(
+        "text-color-direction".to_string(),
+        OptionValue::Choice("forward".to_string()),
+    );
+    options.insert(
+        "text-bg".to_string(),
+        OptionValue::Choice("none".to_string()),
+    );
+    options.insert("text-glow".to_string(), OptionValue::Bool(false));
+    options.insert("text-drop-shadow".to_string(), OptionValue::Bool(false));
+    options.insert("text-border".to_string(), OptionValue::Bool(false));
+    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
+    options.insert("text-particles".to_string(), OptionValue::Bool(false));
+    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
+    let frame = render_text_frame_at(&options, 15, 9, 0.0);
+
+    let mut text_cells: Vec<(u16, Option<Rgb>)> = (0..9)
+        .flat_map(|y| (0..15).map(move |x| (x, y)))
+        .filter_map(|(x, y)| {
+            let cell = frame.get(x, y).unwrap();
+            (cell.ch != ' ').then_some((x, cell.color))
+        })
+        .collect();
+    text_cells.sort_by_key(|(x, _)| *x);
+
+    let left = text_cells.first().unwrap();
+    assert_eq!(left.1, Some(Rgb::new(40, 42, 54)));
+    assert!(
+        text_cells
+            .iter()
+            .any(|(_, color)| *color == Some(Rgb::new(255, 184, 108)))
+    );
 }
 
 #[test]

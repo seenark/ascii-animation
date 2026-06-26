@@ -372,6 +372,12 @@ fn parses_direct_text_art_command() {
         "slide",
         "--text-speed",
         "2.5",
+        "--text-hold-visible-seconds",
+        "1.5",
+        "--text-hold-hidden-seconds",
+        "0.75",
+        "--text-typewriter-loop",
+        "true",
         "--text-drop-shadow",
         "false",
         "--no-color",
@@ -437,6 +443,30 @@ fn parses_direct_text_art_command() {
             .unwrap()
             .as_cli_value(),
         "2.5"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-hold-visible-seconds")
+            .unwrap()
+            .as_cli_value(),
+        "1.5"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-hold-hidden-seconds")
+            .unwrap()
+            .as_cli_value(),
+        "0.75"
+    );
+    assert_eq!(
+        scene.instances[0]
+            .options
+            .get("text-typewriter-loop")
+            .unwrap()
+            .as_cli_value(),
+        "true"
     );
     assert_eq!(
         scene.instances[0]
