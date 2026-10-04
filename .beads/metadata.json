@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "ascii_animation",
+  "project_id": "373d9296-d313-4862-8535-0ad6f4f6d28c"
+}
