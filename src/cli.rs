@@ -77,10 +77,10 @@ fn cli_command_for(registry: &PresetRegistry) -> ClapCommand {
 
 fn descriptor_arg(option: &OptionDescriptor) -> Arg {
     let name = leaked(option.name());
-    let arg = Arg::new(name).long(name).value_name(name);
+    let arg = Arg::new(name).long(name).value_name(name).help(option.help().to_string());
     match option.kind() {
-        OptionKind::Int { .. } => arg.value_parser(value_parser!(i64)),
-        OptionKind::Float { .. } => arg.value_parser(value_parser!(f64)),
+        OptionKind::Int { .. } => arg.allow_negative_numbers(true).value_parser(value_parser!(i64)),
+        OptionKind::Float { .. } => arg.allow_negative_numbers(true).value_parser(value_parser!(f64)),
         OptionKind::Bool => arg.value_parser(value_parser!(bool)),
         OptionKind::Choice { choices } => arg.value_parser(PossibleValuesParser::new(
             choices

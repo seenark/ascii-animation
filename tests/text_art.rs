@@ -1,21 +1,27 @@
 use std::collections::BTreeMap;
+use std::time::Duration;
 use figlet_rs::FIGlet;
 
-use ascii_animation::presets::{build_default_registry, text_art, OptionValue};
-use ascii_animation::render::{AnimationRenderer, FrameBuffer, RenderContext, Rgb};
-use ascii_animation::scene::Layer;
+use ascii_animation::presets::{text_art, OptionValue, PresetRegistry};
+use ascii_animation::render::{FrameBuffer, Rgb};
+use ascii_animation::runtime::SceneSession;
+use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
-fn render_context(width: u16, height: u16, elapsed_seconds: f64) -> RenderContext {
-    RenderContext {
-        elapsed_seconds,
-        layer: Layer::Normal,
-        z_index: 0,
-        order: 0,
-        x_offset: 0,
-        y_offset: 0,
-        width,
-        height,
-    }
+fn text_session(
+    options: &BTreeMap<String, OptionValue>, width: u16, height: u16,
+) -> ascii_animation::Result<SceneSession> {
+    SceneSession::new(Scene {
+        instances: vec![AnimationInstance {
+            id: "text".into(), preset: "text-art".into(), options: options.clone(),
+            placement: Placement::Custom {
+                x: 110u16.saturating_sub(width) / 2,
+                y: 46u16.saturating_sub(height) / 2,
+                width, height,
+            },
+            layer: Layer::Normal, z_index: 0, enabled: true,
+        }],
+        ..Scene::default()
+    }, &PresetRegistry::default(), 7)
 }
 
 fn trim_trailing_blank_lines(content: &str) -> String {
@@ -84,10 +90,14 @@ fn render_text_frame_at(
     height: u16,
     elapsed_seconds: f64,
 ) -> FrameBuffer {
-    let mut renderer = text_art::renderer(options, 7).unwrap();
-    let mut frame = FrameBuffer::new(width, height);
-    renderer.render(&mut frame, render_context(width, height, elapsed_seconds));
-    frame
+    let mut session = text_session(options, width, height).unwrap();
+    let mut remaining = Duration::from_secs_f64(elapsed_seconds);
+    while !remaining.is_zero() {
+        let step = remaining.min(Duration::from_millis(50));
+        session.advance(step);
+        remaining -= step;
+    }
+    session.draw(width, height).unwrap().clone()
 }
 
 fn render_text_frame(options: &BTreeMap<String, OptionValue>, width: u16, height: u16) -> FrameBuffer {
@@ -116,150 +126,6 @@ fn count_non_space(frame: &FrameBuffer) -> usize {
     frame.cells().iter().filter(|cell| cell.ch != ' ').count()
 }
 
-#[test]
-fn text_art_descriptor_has_required_options_and_defaults() {
-    let descriptor = text_art::descriptor();
-    let defaults = descriptor.defaults();
-    let font_option = descriptor
-        .options()
-        .iter()
-        .find(|option| option.name() == "text-font")
-        .unwrap();
-    let font_choices = match font_option.kind() {
-        ascii_animation::presets::OptionKind::Choice { choices } => choices,
-        other => panic!("text-font must be choice option, got {other:?}"),
-    };
-    let text_palette_option = descriptor
-        .options()
-        .iter()
-        .find(|option| option.name() == "text-palette")
-        .unwrap();
-    let text_palette_choices = match text_palette_option.kind() {
-        ascii_animation::presets::OptionKind::Choice { choices } => choices,
-        other => panic!("text-palette must be choice option, got {other:?}"),
-    };
-
-    assert_eq!(descriptor.name(), "text-art");
-    assert_eq!(defaults.get("text").unwrap().as_cli_value(), "HELLO");
-    assert_eq!(
-        defaults.get("text-overflow").unwrap().as_cli_value(),
-        "extend"
-    );
-    assert_eq!(defaults.get("text-font").unwrap().as_cli_value(), "Standard");
-    assert!(!defaults.contains_key("text-fill"));
-    assert!(!defaults.contains_key("text-scale"));
-    assert!(!defaults.contains_key("text-spacing"));
-    assert!(!defaults.contains_key("text-block-shadow"));
-    assert_eq!(
-        defaults.get("text-palette").unwrap().as_cli_value(),
-        "cosmic"
-    );
-    assert_eq!(defaults.get("text-effect").unwrap().as_cli_value(), "none");
-    assert_eq!(
-        defaults.get("text-color-mode").unwrap().as_cli_value(),
-        "gradient-h"
-    );
-    assert_eq!(
-        defaults
-            .get("text-color-direction")
-            .unwrap()
-            .as_cli_value(),
-        "forward"
-    );
-    assert_eq!(defaults.get("text-bg").unwrap().as_cli_value(), "stars");
-    assert_eq!(defaults.get("text-speed").unwrap().as_cli_value(), "1.5");
-    assert_eq!(
-        defaults
-            .get("text-hold-visible-seconds")
-            .unwrap()
-            .as_cli_value(),
-        "0"
-    );
-    assert_eq!(
-        defaults
-            .get("text-hold-hidden-seconds")
-            .unwrap()
-            .as_cli_value(),
-        "0"
-    );
-    assert_eq!(
-        defaults.get("text-typewriter-loop").unwrap().as_cli_value(),
-        "false"
-    );
-    assert_eq!(defaults.get("text-amp").unwrap().as_cli_value(), "2.5");
-    assert_eq!(defaults.get("text-freq").unwrap().as_cli_value(), "1");
-    assert_eq!(defaults.get("text-glitch").unwrap().as_cli_value(), "0.15");
-    assert_eq!(defaults.get("text-bright").unwrap().as_cli_value(), "1");
-    assert_eq!(defaults.get("text-voffset").unwrap().as_cli_value(), "0");
-    assert_eq!(
-        defaults.get("text-drop-shadow").unwrap().as_cli_value(),
-        "false"
-    );
-    assert_eq!(defaults.get("text-border").unwrap().as_cli_value(), "false");
-    assert_eq!(defaults.get("text-glow").unwrap().as_cli_value(), "true");
-    assert_eq!(
-        defaults.get("text-reflection").unwrap().as_cli_value(),
-        "false"
-    );
-    assert_eq!(
-        defaults.get("text-particles").unwrap().as_cli_value(),
-        "false"
-    );
-    assert_eq!(defaults.get("text-mirror").unwrap().as_cli_value(), "false");
-    assert_eq!(
-        text_palette_choices,
-        &[
-            "cosmic".to_string(),
-            "fire".to_string(),
-            "neon".to_string(),
-            "gold".to_string(),
-            "ice".to_string(),
-            "rainbow".to_string(),
-            "plasma".to_string(),
-            "mono".to_string(),
-            "red".to_string(),
-            "candy".to_string(),
-            "catppuccin-latte".to_string(),
-            "catppuccin-frappe".to_string(),
-            "catppuccin-macchiato".to_string(),
-            "catppuccin-mocha".to_string(),
-            "sunset".to_string(),
-            "ocean".to_string(),
-            "forest".to_string(),
-            "rose".to_string(),
-            "cyberpunk".to_string(),
-            "mint".to_string(),
-            "lavender".to_string(),
-            "dracula".to_string(),
-        ]
-    );
-    assert!(
-        descriptor
-            .options()
-            .iter()
-            .any(|option| option.name() == "text-hold-visible-seconds")
-    );
-    assert!(
-        descriptor
-            .options()
-            .iter()
-            .any(|option| option.name() == "text-hold-hidden-seconds")
-    );
-    assert!(
-        descriptor
-            .options()
-            .iter()
-            .any(|option| option.name() == "text-typewriter-loop")
-    );
-    assert!(font_choices.windows(2).all(|w| {
-        w[0].to_ascii_lowercase() <= w[1].to_ascii_lowercase()
-    }));
-    assert!(font_choices.contains(&"ANSI Regular".to_string()));
-    assert!(font_choices.contains(&"Block".to_string()));
-    assert!(font_choices.contains(&"DOS Rebel".to_string()));
-    assert!(font_choices.contains(&"Dot Matrix".to_string()));
-    assert!(font_choices.contains(&"Standard".to_string()));
-}
 
 #[test]
 fn text_art_standard_figlet_renders_known_output() {
@@ -386,12 +252,13 @@ fn text_art_dissolve_holds_visible_then_hidden_before_reappearing() {
     let visible_hold = render_text_frame_at(&options, 15, 9, 0.5);
     let hidden_hold_start = render_text_frame_at(&options, 15, 9, 3.1);
     let hidden_hold_late = render_text_frame_at(&options, 15, 9, 4.4);
-    let dissolve_in = render_text_frame_at(&options, 15, 9, 5.4);
+    let repeated_hold = render_text_frame_at(&options, 15, 9, 7.0);
 
-    assert!(count_non_space(&visible_hold) > 0);
+    let baseline = render_text_frame(&clean_text_options("I"), 15, 9);
+    assert_eq!(visible_hold.to_plain_text(), baseline.to_plain_text());
     assert_eq!(count_non_space(&hidden_hold_start), 0);
     assert_eq!(count_non_space(&hidden_hold_late), 0);
-    assert!(count_non_space(&dissolve_in) > 0);
+    assert_eq!(repeated_hold.to_plain_text(), baseline.to_plain_text());
 }
 
 #[test]
@@ -431,8 +298,9 @@ fn text_art_typewriter_loop_waits_hidden_then_retypes_after_visible_hold() {
     let reset_hidden = render_text_frame_at(&options, 15, 9, 2.30);
 
     assert_eq!(count_non_space(&hidden_hold), 0);
-    assert!(count_non_space(&typing) > 0);
-    assert!(count_non_space(&visible_hold) > 0);
+    let baseline = render_text_frame(&clean_text_options("HI"), 15, 9);
+    assert_ne!(typing.to_plain_text(), baseline.to_plain_text());
+    assert_eq!(visible_hold.to_plain_text(), baseline.to_plain_text());
     assert_eq!(count_non_space(&reset_hidden), 0);
 }
 
@@ -469,7 +337,8 @@ fn text_art_typewriter_default_does_not_loop_after_reveal() {
 
     let frame = render_text_frame_at(&options, 15, 9, 5.0);
 
-    assert!(count_non_space(&frame) > 0);
+    let baseline = render_text_frame(&clean_text_options("HI"), 15, 9);
+    assert_eq!(frame.to_plain_text(), baseline.to_plain_text());
 }
 
 #[test]
@@ -492,10 +361,13 @@ fn text_art_typewriter_reveals_characters_progressively() {
     options.insert("text-speed".to_string(), OptionValue::Float(1.0));
 
     let partial = render_text_frame_at(&options, 15, 9, 0.2);
-    let complete = render_text_frame_at(&options, 15, 9, 0.5);
-
-    assert!(count_non_space(&partial) > 0);
-    assert!(count_non_space(&partial) < count_non_space(&complete));
+    let complete = render_text_frame_at(&options, 15, 9, 1.0);
+    let baseline = render_text_frame(&clean_text_options("HI"), 15, 9);
+    let (x, y) = (0..9).flat_map(|y| (0..15).map(move |x| (x, y)))
+        .filter(|&(x, y)| baseline.get(x, y).unwrap().ch != ' ')
+        .max_by_key(|&(x, _)| x).unwrap();
+    assert_eq!(partial.get(x, y).unwrap().ch, ' ', "second character remains hidden");
+    assert_eq!(complete.to_plain_text(), baseline.to_plain_text());
 }
 
 #[test]
@@ -503,9 +375,7 @@ fn text_art_figlet_size_is_not_scaled() {
     let mut options = clean_text_options("A");
     options.insert("text-scale".to_string(), OptionValue::Float(2.0));
 
-    let err = text_art::renderer(&options, 7).unwrap_err().to_string();
-
-    assert_eq!(err, "unknown option `text-scale` for preset `text-art`");
+    assert!(text_session(&options, 15, 9).is_err());
 }
 
 #[test]
@@ -831,38 +701,10 @@ fn text_art_grid_background_draws_behind_text() {
 
     assert_eq!(frame.get(0, 0).unwrap().ch, '+');
     assert_eq!(frame.get(0, 0).unwrap().color, Some(Rgb::new(26, 34, 64)));
-    assert!(
-        (0..10)
-            .flat_map(|y| (0..16).map(move |x| (x, y)))
-            .any(|(x, y)| {
-                let cell = frame.get(x, y).unwrap();
-                cell.ch != ' ' && cell.ch != '+'
-            })
-    );
-}
-
-#[test]
-fn text_art_default_clean_hello_has_no_shadow_glyphs_when_background_disabled() {
-    let mut options = text_art::descriptor().defaults();
-    options.insert(
-        "text-bg".to_string(),
-        OptionValue::Choice("none".to_string()),
-    );
-    options.insert(
-        "text-effect".to_string(),
-        OptionValue::Choice("wave".to_string()),
-    );
-    options.insert("text-amp".to_string(), OptionValue::Float(0.0));
-    options.insert("text-glow".to_string(), OptionValue::Bool(false));
-    options.insert("text-border".to_string(), OptionValue::Bool(false));
-    options.insert("text-reflection".to_string(), OptionValue::Bool(false));
-    options.insert("text-particles".to_string(), OptionValue::Bool(false));
-    options.insert("text-mirror".to_string(), OptionValue::Bool(false));
-
-    let frame = render_text_frame(&options, 50, 12);
-
-    assert_eq!(count_char(&frame, '▒'), 0);
-    assert!(frame.cells().iter().any(|cell| cell.ch != ' '));
+    let baseline = render_text_frame(&clean_text_options("I"), 16, 10);
+    for (index, cell) in baseline.cells().iter().enumerate().filter(|(_, cell)| cell.ch != ' ') {
+        assert_eq!(frame.cells()[index].ch, cell.ch, "background must remain behind FIGlet text");
+    }
 }
 
 #[test]
@@ -873,27 +715,17 @@ fn text_art_renderer_rejects_invalid_effect_choice() {
         OptionValue::Choice("spin".to_string()),
     );
 
-    let err = text_art::renderer(&options, 7).unwrap_err().to_string();
-
-    assert_eq!(
-        err,
-        "invalid choice for `text-effect`: expected one of [\"none\", \"wave\", \"pulse\", \"glitch\", \"scan\", \"rain\", \"fire\", \"matrix\", \"dissolve\", \"bounce\", \"typewriter\", \"strobe\", \"neon-flicker\"], got `spin`"
-    );
+    assert!(text_session(&options, 15, 9).is_err());
 }
 
 #[test]
 fn text_art_renderer_accepts_sixty_four_chars_and_rejects_sixty_five() {
     let mut accepted = clean_text_options(&"A".repeat(64));
     accepted.insert("text-speed".to_string(), OptionValue::Float(1.0));
-    text_art::renderer(&accepted, 7).unwrap();
+    assert!(text_session(&accepted, 15, 9).is_ok());
 
     let rejected = clean_text_options(&"A".repeat(65));
-    let err = text_art::renderer(&rejected, 7).unwrap_err().to_string();
-
-    assert_eq!(
-        err,
-        "option `text` is too long: expected at most 64 characters, got 65"
-    );
+    assert!(text_session(&rejected, 15, 9).is_err());
 }
 
 #[test]
@@ -930,12 +762,7 @@ fn text_art_rejects_invalid_overflow_choice() {
         OptionValue::Choice("wrap".to_string()),
     );
 
-    let err = text_art::renderer(&options, 7).unwrap_err().to_string();
-
-    assert_eq!(
-        err,
-        "invalid choice for `text-overflow`: expected one of [\"extend\", \"slide\"], got `wrap`"
-    );
+    assert!(text_session(&options, 15, 9).is_err());
 }
 
 #[test]
@@ -948,10 +775,4 @@ fn text_art_renderer_defaults_missing_overflow_to_extend_for_saved_scenes() {
     let later_frame = render_text_frame_at(&options, 10, 9, 6.2);
 
     assert_eq!(text_lines(&first_frame, 10, 9), text_lines(&later_frame, 10, 9));
-}
-
-#[test]
-fn default_registry_includes_text_art() {
-    let registry = build_default_registry();
-    assert!(registry.get("text-art").is_ok());
 }

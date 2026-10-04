@@ -6,7 +6,7 @@ use figlet_rs::FIGlet;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use crate::presets::{OptionDescriptor, OptionValue, PresetDescriptor};
+use crate::presets::{OptionDescriptor, OptionGroup, OptionValue, PresetDescriptor};
 use crate::render::{AnimationRenderer, Cell, FrameBuffer, RenderContext, Rgb};
 use crate::{AsciiAnimError, Result};
 
@@ -314,6 +314,69 @@ struct BitmapCell {
     rel_y: f64,
     gradient_x: f64,
     gradient_y: f64,
+    target: EffectTarget,
+}
+
+// Adapted from ttfx decrypt/scattered at 921bd551c308c235e01c5867f0199efe0691c271.
+// MIT: 2026 37signals / omacom-io; 2023 ChrisBuilds. See THIRD_PARTY_NOTICES.
+#[derive(Debug, Clone, Copy)]
+struct EffectTarget {
+    rank: f64,
+    start_x: f64,
+    start_y: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RevealPhase {
+    Animate,
+    Visible,
+    Hidden,
+}
+
+#[derive(Debug, Clone)]
+struct RevealPlayback {
+    phase: RevealPhase,
+    age: f64,
+    cycle: u64,
+}
+
+impl Default for RevealPlayback {
+    fn default() -> Self {
+        Self { phase: RevealPhase::Animate, age: 0.0, cycle: 0 }
+    }
+}
+
+impl RevealPlayback {
+    fn advance(&mut self, mut delta: f64, options: &TextArtOptions) {
+        let animation = 2.0 / options.speed;
+        let cycle_duration = animation + options.hold_visible_seconds + options.hold_hidden_seconds;
+        // Skip whole cycles without losing overshoot after long accepted updates.
+        let cycles = (delta / cycle_duration).floor() as u64;
+        self.cycle = self.cycle.wrapping_add(cycles);
+        delta %= cycle_duration;
+        loop {
+            let duration = match self.phase {
+                RevealPhase::Animate => animation,
+                RevealPhase::Visible => options.hold_visible_seconds,
+                RevealPhase::Hidden => options.hold_hidden_seconds,
+            };
+            let remaining = (duration - self.age).max(0.0);
+            if delta < remaining {
+                self.age += delta;
+                break;
+            }
+            delta -= remaining;
+            self.age = 0.0;
+            self.phase = match self.phase {
+                RevealPhase::Animate => RevealPhase::Visible,
+                RevealPhase::Visible => RevealPhase::Hidden,
+                RevealPhase::Hidden => {
+                    self.cycle = self.cycle.wrapping_add(1);
+                    RevealPhase::Animate
+                }
+            };
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -338,6 +401,10 @@ pub struct TextArtRenderer {
     bg_stars: Vec<BgStar>,
     rain_cols: Vec<RainColumn>,
     particle_seeds: Vec<ParticleSeed>,
+    bitmap: TextBitmap,
+    drawn: Vec<(i32, i32, char, Rgb, f64)>,
+    reveal: RevealPlayback,
+    last_elapsed: f64,
     seed: u64,
 }
 pub fn descriptor() -> PresetDescriptor {
@@ -416,6 +483,8 @@ pub fn descriptor() -> PresetDescriptor {
                     "typewriter",
                     "strobe",
                     "neon-flicker",
+                    "decrypt",
+                    "scattered",
                 ],
                 false,
             ),
@@ -476,10 +545,59 @@ pub fn descriptor() -> PresetDescriptor {
             OptionDescriptor::bool("text-reflection", "Reflection", false, false),
             OptionDescriptor::bool("text-particles", "Particles", false, true),
             OptionDescriptor::bool("text-mirror", "Mirror", false, false),
-        ],
+        ].into_iter().map(with_option_metadata).collect(),
         boxed_renderer,
     )
     .with_logical_width_hint(logical_width_hint)
+    .with_option_visibility(option_visible)
+}
+
+fn with_option_metadata(option: OptionDescriptor) -> OptionDescriptor {
+    let (group, help) = match option.name() {
+        "text" => (OptionGroup::Basics, "Text rendered with the selected FIGlet font; at most 64 characters."),
+        "text-font" => (OptionGroup::Basics, "Original FIGlet lettering; changing text or font restarts this instance."),
+        "text-effect" => (OptionGroup::Basics, "Decrypt and scattered reveal occupied FIGlet cells, then repeat after the holds."),
+        "text-speed" => (OptionGroup::Motion, "Motion multiplier from 0.1 to 5; decrypt and scattered animate for 2 / speed seconds."),
+        "text-hold-visible-seconds" => (OptionGroup::Motion, "Completed-image hold in seconds, 0 to 10. Zero skips this phase."),
+        "text-hold-hidden-seconds" => (OptionGroup::Motion, "Hidden-text hold in seconds, 0 to 10. Decorations keep their normal behavior."),
+        "text-typewriter-loop" => (OptionGroup::Motion, "Repeat the typewriter effect; decrypt and scattered always repeat independently."),
+        "text-amp" => (OptionGroup::Motion, "Wave or bounce displacement, 0 to 8 cells."),
+        "text-freq" => (OptionGroup::Motion, "Wave frequency multiplier, 0.1 to 4."),
+        "text-glitch" => (OptionGroup::Motion, "Probability of transient glyph distortion, 0 to 1."),
+        "text-overflow" => (OptionGroup::Layout, "Extend the logical canvas or slide oversized text without resizing FIGlet glyphs."),
+        "text-voffset" => (OptionGroup::Layout, "Vertical offset from center, -10 to 10 cells."),
+        "text-bright" => (OptionGroup::Style, "Palette brightness multiplier, 0.2 to 1."),
+        "text-bg" => (OptionGroup::Style, "Decoration drawn behind the text; none leaves untouched cells transparent."),
+        "text-palette" => (OptionGroup::Style, "Color gradient used by text and decorations."),
+        "text-color-mode" => (OptionGroup::Style, "Color by position, character, or animation time."),
+        "text-color-direction" => (OptionGroup::Style, "Reverse the spatial gradient or wave-color motion."),
+        "text-drop-shadow" => (OptionGroup::Style, "Draw a lower-priority shadow without replacing the main glyphs."),
+        "text-border" => (OptionGroup::Style, "Draw a border around the configured bitmap."),
+        "text-glow" => (OptionGroup::Style, "Boost visible text brightness."),
+        "text-reflection" => (OptionGroup::Style, "Draw a faded reflection below the text."),
+        "text-particles" => (OptionGroup::Style, "Add seeded particles in unoccupied cells."),
+        _ => (OptionGroup::Style, "Reflect text horizontally in the instance's region."),
+    };
+    option.with_group(group).with_help(help)
+}
+
+pub(crate) fn option_visible(name: &str, values: &BTreeMap<String, OptionValue>) -> bool {
+    let choice = |key: &str| match values.get(key) {
+        Some(OptionValue::Choice(value)) => value.as_str(),
+        _ => "",
+    };
+    let effect = choice("text-effect");
+    match name {
+        "text-color-direction" => matches!(choice("text-color-mode"), "gradient-h" | "gradient-v" | "wave-color"),
+        "text-speed" => choice("text-overflow") == "slide" || choice("text-color-mode") == "wave-color"
+            || matches!(effect, "wave" | "pulse" | "scan" | "bounce" | "matrix" | "dissolve" | "typewriter" | "strobe" | "rain" | "decrypt" | "scattered"),
+        "text-hold-visible-seconds" | "text-hold-hidden-seconds" => matches!(effect, "dissolve" | "typewriter" | "decrypt" | "scattered"),
+        "text-amp" => matches!(effect, "wave" | "bounce" | "fire" | "rain"),
+        "text-freq" => effect == "wave",
+        "text-glitch" => effect == "glitch",
+        "text-typewriter-loop" => effect == "typewriter",
+        _ => true,
+    }
 }
 
 pub fn boxed_renderer(
@@ -502,18 +620,44 @@ pub fn renderer(options: &BTreeMap<String, OptionValue>, seed: u64) -> Result<Te
     let validated = descriptor().validate_options(options)?;
     let options = TextArtOptions::from_values(&validated)?;
     let mut rng = StdRng::seed_from_u64(seed);
+    let bitmap = build_text_bitmap(&options, seed);
+    let drawn = Vec::with_capacity(bitmap.cells.len());
     Ok(TextArtRenderer {
         bg_stars: build_bg_stars(&mut rng),
         rain_cols: build_rain_columns(&mut rng),
         particle_seeds: build_particle_seeds(&mut rng),
+        bitmap,
+        drawn,
+        reveal: RevealPlayback::default(),
+        last_elapsed: 0.0,
         options,
         seed,
     })
 }
 
 impl AnimationRenderer for TextArtRenderer {
+    fn reconfigure(&mut self, values: &BTreeMap<String, OptionValue>) -> Result<()> {
+        let validated = descriptor().validate_options(values)?;
+        let options = TextArtOptions::from_values(&validated)?;
+        if options.text != self.options.text || options.font != self.options.font {
+            self.bitmap = build_text_bitmap(&options, self.seed);
+            self.drawn.reserve(self.bitmap.cells.len().saturating_sub(self.drawn.len()));
+            self.reveal = RevealPlayback::default();
+        } else if options.effect != self.options.effect {
+            self.reveal = RevealPlayback::default();
+        } else if self.reveal.phase == RevealPhase::Animate {
+            self.reveal.age *= self.options.speed / options.speed;
+        }
+        self.options = options;
+        Ok(())
+    }
+
     fn render(&mut self, frame: &mut FrameBuffer, context: RenderContext) {
-        let bitmap = build_text_bitmap(&self.options);
+        if matches!(self.options.effect.as_str(), "decrypt" | "scattered") {
+            self.reveal.advance((context.elapsed_seconds - self.last_elapsed).max(0.0), &self.options);
+        }
+        self.last_elapsed = context.elapsed_seconds;
+        let bitmap = &self.bitmap;
         let scaled_width = bitmap.width.max(1) as i32;
         let scaled_height = bitmap.height.max(1) as i32;
         let cx = text_origin_x(
@@ -528,7 +672,7 @@ impl AnimationRenderer for TextArtRenderer {
 
         draw_background(
             frame,
-            context,
+            RenderContext { z_index: context.z_index.saturating_sub(2), ..context },
             &self.options,
             &self.bg_stars,
             &self.rain_cols,
@@ -536,7 +680,7 @@ impl AnimationRenderer for TextArtRenderer {
             frame_tick,
         );
 
-        let mut drawn = Vec::new();
+        self.drawn.clear();
         for scaled_row in 0..scaled_height {
             let src_row = scaled_row as usize;
             for scaled_col in 0..scaled_width {
@@ -544,18 +688,19 @@ impl AnimationRenderer for TextArtRenderer {
                 let Some(cell) = bitmap.get(src_col, src_row) else {
                     continue;
                 };
-                let sample = anim_offset(
-                    &self.options,
-                    cell,
-                    scaled_col,
-                    scaled_row,
-                    scaled_width,
-                    scaled_height,
-                    bitmap.visible_chars,
-                    context.elapsed_seconds,
-                    self.seed,
-                    frame_tick,
-                );
+                let sample = if matches!(self.options.effect.as_str(), "decrypt" | "scattered") {
+                    reveal_sample(
+                        &self.options, &self.reveal,
+                        &cell.target,
+                        scaled_col, scaled_row, cx, cy, context, self.seed,
+                    )
+                } else {
+                    anim_offset(
+                        &self.options, cell, scaled_col, scaled_row,
+                        scaled_width, scaled_height, bitmap.visible_chars,
+                        context.elapsed_seconds, self.seed, frame_tick,
+                    )
+                };
                 let alpha = if self.options.glow {
                     (sample.alpha * 1.15).min(1.0)
                 } else {
@@ -611,7 +756,9 @@ impl AnimationRenderer for TextArtRenderer {
                 }
 
                 put_local_cell(frame, context, px, py, ch, Some(color));
-                drawn.push((px, py, ch, color, cell.rel_y));
+                if self.options.reflection {
+                    self.drawn.push((px, py, ch, color, cell.rel_y));
+                }
 
                 if self.options.mirror {
                     let mirror_x = context.width as i32 - 1 - px;
@@ -630,7 +777,7 @@ impl AnimationRenderer for TextArtRenderer {
         }
 
         if self.options.reflection {
-            draw_reflection(frame, context, cy, scaled_height, &drawn);
+            draw_reflection(frame, context, cy, scaled_height, &self.drawn);
         }
 
         if self.options.border {
@@ -709,6 +856,8 @@ impl TextArtOptions {
                     "typewriter",
                     "strobe",
                     "neon-flicker",
+                    "decrypt",
+                    "scattered",
                 ],
             )?,
             color_mode: get_choice(
@@ -769,6 +918,42 @@ impl TextBitmap {
     fn get(&self, x: usize, y: usize) -> Option<&BitmapCell> {
         self.cells[y * self.width + x].as_ref()
     }
+}
+
+fn effect_target(seed: u64, index: u64) -> EffectTarget {
+    EffectTarget {
+        rank: 0.15 + 0.8 * unit_hash(seed, index, 0, 0, 201),
+        start_x: unit_hash(seed, index, 0, 0, 202),
+        start_y: unit_hash(seed, index, 0, 0, 203),
+    }
+}
+
+fn reveal_sample(
+    options: &TextArtOptions, playback: &RevealPlayback, target: &EffectTarget,
+    col: i32, row: i32, cx: i32, cy: i32, context: RenderContext, seed: u64,
+) -> AnimSample {
+    let mut sample = AnimSample { dx: 0.0, dy: 0.0, alpha: 1.0, glyph: None };
+    if playback.phase == RevealPhase::Hidden {
+        sample.alpha = 0.0;
+    } else if playback.phase == RevealPhase::Animate {
+        let progress = (playback.age * options.speed / 2.0).clamp(0.0, 1.0);
+        if options.effect == "decrypt" {
+            if progress < target.rank {
+                let tick = (playback.age * options.speed * 24.0).floor() as u64;
+                // Only non-space printable ASCII ciphertext; target spaces remain transparent.
+                sample.glyph = char::from_u32(33 + (unit_hash(
+                    seed, col as u64, row as u64, tick, 204u64.wrapping_add(playback.cycle),
+                ) * 94.0).floor().min(93.0) as u32);
+            }
+        } else {
+            let delay = target.rank * 0.25;
+            let travel = ((progress - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+            let eased = travel * travel * (3.0 - 2.0 * travel);
+            sample.dx = (target.start_x * context.width.saturating_sub(1) as f64 - (cx + col) as f64) * (1.0 - eased);
+            sample.dy = (target.start_y * context.height.saturating_sub(1) as f64 - (cy + row) as f64) * (1.0 - eased);
+        }
+    }
+    sample
 }
 
 static PARSED_FIGLET_FONTS: OnceLock<Vec<(&'static str, FIGlet)>> = OnceLock::new();
@@ -849,15 +1034,16 @@ fn text_bitmap_width(options: &TextArtOptions) -> usize {
         .unwrap_or(1)
 }
 
-fn build_text_bitmap(options: &TextArtOptions) -> TextBitmap {
+fn build_text_bitmap(options: &TextArtOptions, seed: u64) -> TextBitmap {
     build_figlet_text_bitmap(
         options,
         figlet_font(&options.font)
             .expect("validated text-font must resolve to embedded FIGlet font"),
+        seed,
     )
 }
 
-fn build_figlet_text_bitmap(options: &TextArtOptions, font: &FIGlet) -> TextBitmap {
+fn build_figlet_text_bitmap(options: &TextArtOptions, font: &FIGlet, seed: u64) -> TextBitmap {
     let Some(rows) = figlet_rows(font, &options.text) else {
         return TextBitmap::blank(1, 1);
     };
@@ -895,6 +1081,7 @@ fn build_figlet_text_bitmap(options: &TextArtOptions, font: &FIGlet) -> TextBitm
                     rel_y: row_index as f64 / (height.saturating_sub(1).max(1) as f64),
                     gradient_x: 0.0,
                     gradient_y: 0.0,
+                    target: effect_target(seed, (row_index * width + col_index) as u64),
                 },
             );
         }

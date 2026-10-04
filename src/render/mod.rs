@@ -21,4 +21,18 @@ pub struct RenderContext {
 
 pub trait AnimationRenderer {
     fn render(&mut self, frame: &mut FrameBuffer, context: RenderContext);
+
+    /// Apply already validated options without replacing retained simulation state.
+    fn reconfigure(
+        &mut self,
+        _options: &std::collections::BTreeMap<String, crate::presets::OptionValue>,
+    ) -> crate::Result<()> {
+        Err(crate::AsciiAnimError::Terminal(
+            "renderer does not support live reconfiguration".into(),
+        ))
+    }
+
+    fn depends_on_dimensions(&self) -> bool {
+        false
+    }
 }

@@ -78,6 +78,13 @@ impl FrameBuffer {
         }
     }
 
+    pub fn reset(&mut self, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
+        self.cells.resize(width as usize * height as usize, Cell::empty());
+        self.cells.fill(Cell::empty());
+    }
+
     pub fn width(&self) -> u16 {
         self.width
     }
