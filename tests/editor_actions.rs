@@ -322,3 +322,46 @@ fn tiny_resize_cannot_accept_invisible_discard_confirmation() {
     key(&mut state, KeyCode::Char('q'));
     assert_eq!(key(&mut state, KeyCode::Char('d')), TuiAction::Quit);
 }
+
+#[test]
+fn invalid_text_reports_field_error_without_committing_and_can_be_corrected() {
+    let registry = build_default_registry();
+    let mut state = TuiState::default_with_registry(&registry).unwrap();
+    state.add_instance("text-art", &registry).unwrap();
+    state.select_option_by_name("text").unwrap();
+    state.resize(36, 10);
+    let previous_scene = state.scene.clone();
+    let previous_status = state.status().map(str::to_owned);
+    key(&mut state, KeyCode::Enter);
+    key(&mut state, KeyCode::Char('é'));
+    key(&mut state, KeyCode::Enter);
+    assert_eq!(state.scene, previous_scene);
+    assert_eq!(state.surface(), ascii_animation::tui::Surface::Editor);
+    assert_ne!(state.status(), previous_status.as_deref());
+    key(&mut state, KeyCode::Backspace);
+    key(&mut state, KeyCode::Enter);
+    assert_eq!(state.scene, previous_scene);
+    assert_eq!(state.surface(), ascii_animation::tui::Surface::None);
+    assert_eq!(state.status(), previous_status.as_deref());
+}
+
+#[test]
+fn wide_layout_keeps_sidebar_and_preview_bounded_across_u16_terminal_widths() {
+    use ascii_animation::tui::tui_layout;
+    use ascii_animation::viewport::animation_viewport_size_for_terminal;
+    use ratatui::layout::Rect;
+    for width in [110, 2184, 2185, 10000, u16::MAX] {
+        // Rect::new caps area and can change the layout mode before this seam runs.
+        let area = Rect { x: 0, y: 0, width, height: 38 };
+        let layout = tui_layout(area);
+        assert!((32..=42).contains(&layout.options.width));
+        assert_eq!(layout.preview.x, layout.options.width);
+        for pane in [layout.options, layout.preview] {
+            assert!(u32::from(pane.x) + u32::from(pane.width) <= u32::from(width));
+            assert!(u32::from(pane.y) + u32::from(pane.height) <= u32::from(area.height));
+        }
+        let (viewport_width, viewport_height) = animation_viewport_size_for_terminal(width, 38);
+        assert!(viewport_width <= layout.preview.width);
+        assert!(viewport_height <= layout.preview.height);
+    }
+}

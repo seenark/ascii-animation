@@ -119,6 +119,7 @@ ascii-animation tui
 ```
 
 The editor opens directly into a live preview. Wide terminals show the Scene list and inspector beside it. At 80–109 columns and at least 24 rows, the preview sits above the editor. Smaller terminals use full-width Preview, Scene, and Edit views; Tab switches focus and the active view. The inspector scrolls to keep its selected field visible.
+Field help shows exact CLI flags, including options in the Layout group; Scene-only controls are labeled separately. A cropped-Canvas warning remains visible in fullscreen preview without resizing the animation or its FIGlet glyphs.
 
 Core controls:
 
@@ -138,6 +139,7 @@ Core controls:
 - `q` — request quit; unsaved changes offer Save, Discard, and Cancel
 
 Text edits support cursor movement, Home/End, Backspace, and Delete. Printable shortcut characters remain text while editing or searching. Escape restores the committed value and keeps the live session running.
+Invalid drafts keep the committed Scene unchanged. The inspector shows a concise validation reason beside the draft and in the status line, including at the minimum supported 36-column layout.
 
 The unsaved marker applies to every Scene, including new defaults and normalized startup settings. A failed save keeps the Scene in memory and leaves prior saved data recoverable. Invalid startup files offer Reload or an unsaved default without overwriting the original.
 

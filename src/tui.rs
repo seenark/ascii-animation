@@ -40,7 +40,7 @@ pub fn tui_layout(area: Rect) -> TuiLayout {
 }
 
 #[derive(Clone)]
-struct Field { name: String, label: String, kind: OptionKind, group: OptionGroup, help: String, rebuilds: bool }
+struct Field { name: String, cli_flag: Option<String>, label: String, kind: OptionKind, group: OptionGroup, help: String, rebuilds: bool }
 struct Draft { name: String, value: OptionValue, cursor: usize, error: Option<String> }
 struct Browser { search: String, cursor: usize, names: Vec<String>, selected: usize, replace: bool, description_scroll: u16 }
 enum Dialog {
@@ -145,7 +145,12 @@ impl TuiState {
     pub fn fullscreen(&self) -> bool { self.fullscreen }
     pub fn is_paused(&self) -> bool { self.session.is_paused() }
     pub fn elapsed_seconds(&self) -> f64 { self.session.elapsed_seconds() }
-    pub fn status(&self) -> Option<&str> { self.status.as_deref() }
+    pub fn status(&self) -> Option<&str> {
+        if let Dialog::Editor(draft) = &self.dialog {
+            if let Some(error) = &draft.error { return Some(error); }
+        }
+        self.status.as_deref()
+    }
     pub fn copy_status(&self) -> Option<&str> { self.copy_status.as_deref() }
     pub fn surface(&self) -> Surface {
         match self.dialog { Dialog::None => Surface::None, Dialog::Browser(_) => Surface::Browser,
@@ -310,7 +315,7 @@ impl TuiState {
         let instance = self.selected_instance();
         let descriptor = registry.get(&instance.preset)?;
         let mut fields: Vec<_> = descriptor.visible_options(&instance.options).into_iter().map(|o| Field {
-            name: o.name().into(), label: o.label().into(), kind: o.kind().clone(), group: o.group(), help: o.help().into(), rebuilds: o.rebuilds_state(),
+            name: o.name().into(), cli_flag: Some(format!("--{}", o.name())), label: o.label().into(), kind: o.kind().clone(), group: o.group(), help: o.help().into(), rebuilds: o.rebuilds_state(),
         }).collect();
         fields.sort_by_key(|f| group_index(f.group));
         fields.push(layout_field("enabled", "Enabled", OptionKind::Bool, "Disabled instances keep progressing without drawing."));
@@ -342,7 +347,7 @@ impl TuiState {
         set_field(&mut scene.instances[self.selected_instance], &draft.name, draft.value.clone(), &self.custom_placements[self.selected_instance]);
         match SceneSession::new(scene, registry, 0) {
             Ok(mut temporary) => { temporary.set_paused(self.session.is_paused()); self.temporary = Some(temporary); if let Dialog::Editor(draft) = &mut self.dialog { draft.error = None; } }
-            Err(err) => { if let Dialog::Editor(draft) = &mut self.dialog { draft.error = Some(err.to_string()); } }
+            Err(err) => { if let Dialog::Editor(draft) = &mut self.dialog { draft.error = Some(field_error_message(&err)); } }
         }
     }
     fn open_browser(&mut self, replace: bool, registry: &PresetRegistry) -> Result<()> {
@@ -387,7 +392,7 @@ pub fn handle_tui_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegi
                 set_field(&mut scene.instances[state.selected_instance], &draft.name, draft.value.clone(), &state.custom_placements[state.selected_instance]);
                 match state.commit(scene, state.identities(), registry) {
                     Ok(()) => state.close(),
-                    Err(err) => { draft.error = Some(err.to_string()); state.dialog = Dialog::Editor(draft); }
+                    Err(err) => { draft.error = Some(field_error_message(&err)); state.dialog = Dialog::Editor(draft); }
                 }
                 return Ok(TuiAction::Continue);
             }
@@ -546,6 +551,17 @@ pub fn handle_tui_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegi
     Ok(TuiAction::Continue)
 }
 
+fn field_error_message(error: &AsciiAnimError) -> String {
+    match error {
+        AsciiAnimError::AnimationInstance { source, .. } => field_error_message(source),
+        AsciiAnimError::InvalidOptionType { expected, .. } => format!("Expected {expected}"),
+        AsciiAnimError::TextTooLong { max, .. } => format!("Use at most {max} characters"),
+        AsciiAnimError::OptionOutOfRange { min, max, .. } => format!("Expected {min}..{max}"),
+        AsciiAnimError::InvalidChoice { .. } => "Choose an available value".into(),
+        _ => error.to_string(),
+    }
+}
+
 fn edit_text(text: &mut String, cursor: &mut usize, key: KeyEvent, max_len: Option<usize>) -> bool {
     match key.code {
         KeyCode::Left => *cursor = text[..*cursor].char_indices().last().map(|(index, _)| index).unwrap_or(0),
@@ -567,7 +583,7 @@ fn edit_text(text: &mut String, cursor: &mut usize, key: KeyEvent, max_len: Opti
 }
 fn choices(values: &[&str]) -> OptionKind { OptionKind::Choice { choices: values.iter().map(|s| s.to_string()).collect() } }
 fn layout_field(name: &str, label: &str, kind: OptionKind, help: &str) -> Field {
-    Field { name: name.into(), label: label.into(), kind, group: OptionGroup::Layout, help: help.into(), rebuilds: false }
+    Field { name: name.into(), cli_flag: None, label: label.into(), kind, group: OptionGroup::Layout, help: help.into(), rebuilds: false }
 }
 fn group_index(group: OptionGroup) -> u8 { match group { OptionGroup::Basics => 0, OptionGroup::Motion => 1, OptionGroup::Style => 2, OptionGroup::Layout => 3 } }
 fn group_label(group: OptionGroup) -> &'static str { match group { OptionGroup::Basics => "Basics", OptionGroup::Motion => "Motion", OptionGroup::Style => "Style", OptionGroup::Layout => "Layout (advanced)" } }
@@ -709,6 +725,12 @@ fn draw_editor(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut Tui
     if state.fullscreen && matches!(state.dialog, Dialog::None) {
         let preview = state.preview_text(area.width.max(1), area.height.max(1));
         frame.render_widget(Paragraph::new(preview), area);
+        let (canvas_width, canvas_height) = state.session.canvas_dimensions();
+        if canvas_width > area.width || canvas_height > area.height {
+            let warning = "Canvas cropped | f/Esc return";
+            frame.render_widget(Paragraph::new(warning).style(Style::default().bg(GRAPHITE).fg(AMBER)),
+                Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width.min(warning.len() as u16), 1));
+        }
         return;
     }
     let layout = tui_layout(area);
@@ -773,7 +795,7 @@ fn draw_editor(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut Tui
         else if matches!(state.dialog, Dialog::Browser(_)) { "Enter chooses; PgUp/PgDn details" }
         else if matches!(state.dialog, Dialog::Export { .. }) {
             state.copy_status.as_deref().or(state.status.as_deref()).unwrap_or("Up/Down/PageUp/PageDown: command")
-        } else { state.status.as_deref().unwrap_or("Ready") };
+        } else { state.status().unwrap_or("Ready") };
     let global = match &state.dialog {
         Dialog::Recovery(_) => "Up/Down/PageUp/PageDown: details".to_string(),
         Dialog::Browser(_) | Dialog::Editor(_) => "Printable keys type; Esc cancels".to_string(),
@@ -819,7 +841,7 @@ fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
         let range = match &field.kind { OptionKind::Int { min, max, step } => format!("{min}..{max}; step {step}"),
             OptionKind::Float { min, max } => format!("{min}..{max}"), OptionKind::Text { max_len } => format!("ASCII; max {max_len}"),
             OptionKind::Bool => "on/off".into(), OptionKind::Choice { .. } => "Enter: choices; Escape: cancel".into() };
-        let flag = if field.group == OptionGroup::Layout { field.name.clone() } else { format!("--{}", field.name) };
+        let flag = field.cli_flag.as_deref().unwrap_or(&field.name);
         frame.render_widget(Paragraph::new(format!("{flag}  {range}\n{}", field.help)).style(Style::default().fg(MUTED)).wrap(Wrap { trim: false }),
             Rect::new(area.x + 1, content.y + content.height, area.width.saturating_sub(2), help_height));
     }
@@ -880,7 +902,7 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &TuiState, registry: &PresetRegistr
         Dialog::Editor(draft) => {
             let field = state.fields.iter().find(|f| f.name == draft.name).unwrap();
             let value = match &draft.value { OptionValue::Text(text) => cursor_window(text, draft.cursor, modal.width.saturating_sub(4) as usize), other => format_tui_option_value(other) };
-            (format!("Edit {}", field.label), Text::from(format!("{value}\nEnter commit; Esc cancel\nArrows/Home/End; Backspace/Delete\n{}", draft.error.as_deref().unwrap_or(&field.help))), 0)
+            (format!("Edit {}", field.label), Text::from(format!("{value}\n{}\nEnter commit; Esc cancel\nArrows/Home/End; Backspace/Delete", draft.error.as_deref().unwrap_or(&field.help))), 0)
         }
         Dialog::ConfirmDelete => ("Delete animation instance?".into(), Text::from(format!("Enter/y delete; Esc/n cancel\nRemove {} and its configured options?", state.selected_instance().id)), 0),
         Dialog::ConfirmReplace(name) => ("Replace configured Preset?".into(), Text::from(format!("Enter/y replace; Esc/n cancel\nReplace {} with {name}? Prior Preset options are lost.\nPlacement, Layer and Z-index remain.", state.selected_instance().id)), 0),

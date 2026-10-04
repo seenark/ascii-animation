@@ -18,7 +18,7 @@ pub fn split_tui_layout(area: Rect) -> (Rect, Rect) {
     let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(4));
     match editor_layout(area.width, area.height) {
         EditorLayout::Wide => {
-            let sidebar = (area.width * 30 / 100).clamp(32, 42);
+            let sidebar = (u32::from(area.width) * 30 / 100).clamp(32, 42) as u16;
             (Rect::new(body.x, body.y, sidebar, body.height),
              Rect::new(body.x + sidebar, body.y, body.width.saturating_sub(sidebar), body.height))
         }

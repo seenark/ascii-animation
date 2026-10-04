@@ -272,7 +272,11 @@ impl SceneSession {
 }
 
 fn instance_error(instance: &AnimationInstance, error: AsciiAnimError) -> AsciiAnimError {
-    AsciiAnimError::Terminal(format!("animation instance `{}` ({}): {error}", instance.id, instance.preset))
+    AsciiAnimError::AnimationInstance {
+        id: instance.id.clone(),
+        preset: instance.preset.clone(),
+        source: Box::new(error),
+    }
 }
 
 

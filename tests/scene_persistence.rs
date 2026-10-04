@@ -28,18 +28,23 @@ fn saving_replaces_complete_scene_without_modifying_previous_reader_data() {
     assert_eq!(Scene::load_from_path(&path).unwrap(), current);
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn failed_save_keeps_scene_and_prior_recoverable_file() {
+fn failed_atomic_save_preserves_the_existing_target_scene() {
     let directory = tempfile::tempdir().unwrap();
-    let prior_path = directory.path().join("scene.toml");
-    let current = scene();
-    current.save_to_path(&prior_path).unwrap();
-    let prior_text = std::fs::read_to_string(&prior_path).unwrap();
-    let rejected_path = directory.path().join("cannot-replace-directory");
-    std::fs::create_dir(&rejected_path).unwrap();
-    let mut edited = current.clone();
+    let path = directory.path().join("s".repeat(255));
+    let original = scene();
+    std::fs::write(&path, toml::to_string_pretty(&original).unwrap()).unwrap();
+    let mut edited = original.clone();
     edited.color = true;
-    assert!(edited.save_to_path(&rejected_path).is_err());
-    assert_eq!(std::fs::read_to_string(&prior_path).unwrap(), prior_text);
-    assert!(edited.color);
+    let error = edited.save_to_path(&path).unwrap_err();
+    match error {
+        ascii_animation::AsciiAnimError::SceneConfigWrite { path: failed_path, source } => {
+            assert_eq!(failed_path, path);
+            let name_too_long = if cfg!(target_os = "macos") { 63 } else { 36 };
+            assert_eq!(source.raw_os_error(), Some(name_too_long));
+        }
+        other => panic!("expected a filesystem save failure, got {other}"),
+    }
+    assert_eq!(Scene::load_from_path(&path).unwrap(), original);
 }
