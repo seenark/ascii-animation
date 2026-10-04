@@ -163,7 +163,24 @@ fn descriptor_value_from_matches(
 
 pub fn run() -> anyhow::Result<()> {
     let registry = build_default_registry();
-    match parse_command_from(std::env::args_os(), &registry)? {
+    let command = match parse_command_from(std::env::args_os(), &registry) {
+        Ok(command) => command,
+        Err(err) => {
+            let Some(clap_err) = err.downcast_ref::<clap::Error>() else {
+                return Err(err);
+            };
+            if matches!(
+                clap_err.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) {
+                clap_err.print()?;
+                return Ok(());
+            }
+            return Err(err);
+        }
+    };
+
+    match command {
         ParsedCommand::Run(args) => {
             let scene = scene_from_run_args(&args, &registry)?;
             runtime::run_scene(scene, &registry, resolved_seed(args.seed))?;

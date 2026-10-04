@@ -57,6 +57,8 @@ cargo run -- tui
 
 ## How to use
 
+Use `ascii-animation --help` or `ascii-animation run --help` to view CLI options.
+
 ### 1. Run a preset directly
 
 ```sh

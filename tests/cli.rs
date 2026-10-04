@@ -10,6 +10,33 @@ use ascii_animation::runtime::{
 };
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
+#[test]
+fn cli_help_and_version_exit_successfully_on_stdout() {
+    for args in [&["run", "--help"][..], &["--version"][..]] {
+        let output = assert_cmd::Command::cargo_bin("ascii-animation")
+            .unwrap()
+            .args(args)
+            .output()
+            .unwrap();
+
+        assert!(output.status.success());
+        assert!(!output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn cli_argument_errors_exit_unsuccessfully_on_stderr() {
+    let output = assert_cmd::Command::cargo_bin("ascii-animation")
+        .unwrap()
+        .args(["run", "--unknown-option"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
+}
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
 static RECORDED_SEEDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
