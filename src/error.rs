@@ -54,6 +54,14 @@ pub enum AsciiAnimError {
     #[error("scene must contain at least one animation instance")]
     EmptyScene,
 
+    #[error("animation instance `{id}` ({preset}): {source}")]
+    AnimationInstance {
+        id: String,
+        preset: String,
+        #[source]
+        source: Box<AsciiAnimError>,
+    },
+
     #[error("failed to parse scene config at {path}: {source}")]
     SceneConfigParse {
         path: PathBuf,

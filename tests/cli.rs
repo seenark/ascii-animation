@@ -5,9 +5,7 @@ use std::sync::Mutex;
 use ascii_animation::cli::{parse_run_args_from, run_command_for, scene_from_run_args};
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::render::ansi::render_to_ansi;
-use ascii_animation::runtime::{
-    prepare_scene_terminal, render_centered_scene_frame, render_scene_frame, TerminalDriver,
-};
+use ascii_animation::runtime::{prepare_scene_terminal, SceneSession, TerminalDriver};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
 
 #[test]
@@ -39,7 +37,6 @@ fn cli_argument_errors_exit_unsuccessfully_on_stderr() {
 }
 static HOME_LOCK: Mutex<()> = Mutex::new(());
 
-static RECORDED_SEEDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
 
 fn galaxy_scene(color: bool) -> Scene {
     let mut options = BTreeMap::new();
@@ -71,6 +68,13 @@ where
     S: Into<std::ffi::OsString> + Clone,
 {
     parse_run_args_from(args, &build_default_registry()).unwrap()
+}
+
+#[test]
+fn fire_negative_wind_can_be_entered_as_a_separate_cli_value() {
+    let args = parse_run(["ascii-animation", "run", "fire", "--fire-wind", "-0.5"]);
+    let scene = scene_from_run_args(&args, &build_default_registry()).unwrap();
+    assert_eq!(scene.instances[0].options["fire-wind"], OptionValue::Float(-0.5));
 }
 
 #[test]
@@ -597,7 +601,7 @@ fn parses_long_direct_text_art_command() {
 }
 
 #[test]
-fn render_centered_scene_frame_extends_text_art_canvas_for_extend_overflow() {
+fn session_extends_text_art_canvas_for_extend_overflow() {
     let registry = build_default_registry();
     let mut options = ascii_animation::presets::text_art::descriptor().defaults();
     options.insert(
@@ -634,8 +638,9 @@ fn render_centered_scene_frame_extends_text_art_canvas_for_extend_overflow() {
         }],
     };
 
-    let frame = render_centered_scene_frame(&scene, &registry, 7, 0.0, 124, 16).unwrap();
-    let plain = render_to_ansi(&frame, false);
+    let mut session = SceneSession::new(scene, &registry, 7).unwrap();
+    let frame = session.draw(124, 16).unwrap();
+    let plain = render_to_ansi(frame, false);
 
     assert_eq!(frame.width(), 124);
     assert!(plain.lines().any(|line| line.chars().any(|ch| ch != ' ')));
@@ -741,13 +746,6 @@ fn demo_renderer(
     Ok(Box::new(FillRenderer { ch: '#' }))
 }
 
-fn seed_recording_renderer(
-    _options: &BTreeMap<String, OptionValue>,
-    seed: u64,
-) -> ascii_animation::Result<Box<dyn ascii_animation::render::AnimationRenderer>> {
-    RECORDED_SEEDS.lock().unwrap().push(seed);
-    Ok(Box::new(FillRenderer { ch: '#' }))
-}
 
 fn assert_filled_region(
     frame: &ascii_animation::render::FrameBuffer,
@@ -772,37 +770,7 @@ fn assert_filled_region(
 }
 
 #[test]
-fn render_scene_frame_dispatches_registered_presets() {
-    let registry = ascii_animation::presets::PresetRegistry::new(vec![
-        ascii_animation::presets::PresetDescriptor::new(
-            "demo",
-            "Demo",
-            "Test preset",
-            vec![],
-            demo_renderer,
-        ),
-    ]);
-    let scene = Scene {
-        frame_rate: 24,
-        color: false,
-        instances: vec![AnimationInstance {
-            id: "demo-1".to_string(),
-            preset: "demo".to_string(),
-            options: BTreeMap::new(),
-            placement: Placement::Fill,
-            layer: Layer::Normal,
-            z_index: 0,
-            enabled: true,
-        }],
-    };
-
-    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 6, 3).unwrap();
-
-    assert_eq!(frame.get(0, 0).unwrap().ch, '#');
-    assert_eq!(frame.get(5, 2).unwrap().ch, '#');
-}
-#[test]
-fn render_scene_frame_uses_distinct_bounds_for_non_fill_placements() {
+fn session_uses_distinct_bounds_for_non_fill_placements() {
     let registry = ascii_animation::presets::PresetRegistry::new(vec![
         ascii_animation::presets::PresetDescriptor::new(
             "demo",
@@ -814,11 +782,11 @@ fn render_scene_frame_uses_distinct_bounds_for_non_fill_placements() {
     ]);
 
     let cases = [
-        (Placement::Center, (2, 1, 4, 2)),
-        (Placement::Top, (0, 0, 8, 2)),
-        (Placement::Bottom, (0, 2, 8, 2)),
-        (Placement::Left, (0, 0, 4, 4)),
-        (Placement::Right, (4, 0, 4, 4)),
+        (Placement::Center, (27, 11, 55, 23)),
+        (Placement::Top, (0, 0, 110, 23)),
+        (Placement::Bottom, (0, 23, 110, 23)),
+        (Placement::Left, (0, 0, 55, 46)),
+        (Placement::Right, (55, 0, 55, 46)),
     ];
 
     for (placement, (x, y, width, height)) in cases {
@@ -836,99 +804,14 @@ fn render_scene_frame_uses_distinct_bounds_for_non_fill_placements() {
             }],
         };
 
-        let frame = render_scene_frame(&scene, &registry, 1, 0.0, 8, 4).unwrap();
-        assert_filled_region(&frame, x, y, width, height);
+        let mut session = SceneSession::new(scene, &registry, 1).unwrap();
+        assert_filled_region(session.draw(110, 46).unwrap(), x, y, width, height);
     }
 }
 
-#[test]
-fn render_scene_frame_wraps_instance_seed_derivation() {
-    RECORDED_SEEDS.lock().unwrap().clear();
-    let registry = ascii_animation::presets::PresetRegistry::new(vec![
-        ascii_animation::presets::PresetDescriptor::new(
-            "demo",
-            "Demo",
-            "Test preset",
-            vec![],
-            seed_recording_renderer,
-        ),
-    ]);
-    let scene = Scene {
-        frame_rate: 24,
-        color: false,
-        instances: vec![
-            AnimationInstance {
-                id: "demo-1".to_string(),
-                preset: "demo".to_string(),
-                options: BTreeMap::new(),
-                placement: Placement::Fill,
-                layer: Layer::Normal,
-                z_index: 0,
-                enabled: true,
-            },
-            AnimationInstance {
-                id: "demo-2".to_string(),
-                preset: "demo".to_string(),
-                options: BTreeMap::new(),
-                placement: Placement::Fill,
-                layer: Layer::Normal,
-                z_index: 0,
-                enabled: true,
-            },
-        ],
-    };
-
-    render_scene_frame(&scene, &registry, u64::MAX, 0.0, 6, 3).unwrap();
-
-    assert_eq!(*RECORDED_SEEDS.lock().unwrap(), vec![u64::MAX, 0]);
-}
 
 #[test]
-fn direct_scene_renders_non_empty_frame() {
-    let args = parse_run([
-        "ascii-animation",
-        "run",
-        "galaxy",
-        "--stars",
-        "100",
-        "--no-color",
-    ]);
-    let registry = build_default_registry();
-    let scene = scene_from_run_args(&args, &registry).unwrap();
-
-    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
-    let text = render_to_ansi(&frame, false);
-
-    assert_eq!(text.lines().count(), 16);
-    assert!(text.chars().any(|ch| ch != ' ' && ch != '\n'));
-}
-
-#[test]
-fn direct_text_art_scene_renders_non_empty_frame() {
-    let args = parse_run([
-        "ascii-animation",
-        "run",
-        "text-art",
-        "--text",
-        "OK",
-        "--text-bg",
-        "none",
-        "--text-effect",
-        "none",
-        "--no-color",
-    ]);
-    let registry = build_default_registry();
-    let scene = scene_from_run_args(&args, &registry).unwrap();
-
-    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
-    let text = render_to_ansi(&frame, false);
-
-    assert_eq!(text.lines().count(), 16);
-    assert!(text.chars().any(|ch| ch != ' ' && ch != '\n'));
-}
-
-#[test]
-fn render_scene_frame_respects_custom_placement() {
+fn session_respects_custom_placement() {
     let registry = build_default_registry();
     let mut scene = galaxy_scene(false);
     scene.instances[0].placement = Placement::Custom {
@@ -938,9 +821,9 @@ fn render_scene_frame_respects_custom_placement() {
         height: 16,
     };
 
-    let frame = render_scene_frame(&scene, &registry, 1, 0.0, 40, 16).unwrap();
-
-    assert!((0..20).all(|x| (0..16).all(|y| frame.get(x, y).unwrap().ch == ' ')));
+    let mut session = SceneSession::new(scene, &registry, 1).unwrap();
+    let frame = session.draw(110, 46).unwrap();
+    assert!((0..20).all(|x| (0..46).all(|y| frame.get(x, y).unwrap().ch == ' ')));
     assert!((20..40).any(|x| (0..16).any(|y| frame.get(x, y).unwrap().ch != ' ')));
 }
 
@@ -974,9 +857,8 @@ fn centered_runtime_viewport_crops_from_logical_scene_center() {
         }],
     };
 
-    let frame = render_centered_scene_frame(&scene, &registry, 1, 0.0, 10, 6).unwrap();
-
-    assert_filled_region(&frame, 4, 2, 2, 2);
+    let mut session = SceneSession::new(scene, &registry, 1).unwrap();
+    assert_filled_region(session.draw(10, 6).unwrap(), 4, 2, 2, 2);
 }
 
 #[test]
@@ -1009,9 +891,8 @@ fn centered_runtime_viewport_pads_logical_scene_center() {
         }],
     };
 
-    let frame = render_centered_scene_frame(&scene, &registry, 1, 0.0, 114, 50).unwrap();
-
-    assert_filled_region(&frame, 56, 24, 2, 2);
+    let mut session = SceneSession::new(scene, &registry, 1).unwrap();
+    assert_filled_region(session.draw(114, 50).unwrap(), 56, 24, 2, 2);
 }
 
 struct FailingTerminal {

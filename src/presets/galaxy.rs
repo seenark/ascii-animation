@@ -88,6 +88,13 @@ pub fn renderer(options: &BTreeMap<String, OptionValue>, seed: u64) -> Result<Ga
 }
 
 impl AnimationRenderer for GalaxyRenderer {
+    fn reconfigure(&mut self, options: &BTreeMap<String, OptionValue>) -> Result<()> {
+        let validated = descriptor().validate_options(options)?;
+        let options = GalaxyOptions::from_values(&validated)?;
+        self.options = options;
+        Ok(())
+    }
+
     fn render(&mut self, frame: &mut FrameBuffer, context: RenderContext) {
         let rotation = self.options.speed as f64 * PI / 180.0 * context.elapsed_seconds;
         let cx = context.width as f64 / 2.0;
@@ -312,7 +319,7 @@ fn gradient(name: &str) -> &'static [char] {
     }
 }
 
-fn palette(name: &str) -> &'static [Rgb] {
+pub(crate) fn palette(name: &str) -> &'static [Rgb] {
     match name {
         "stardust" => &PALETTE_STARDUST,
         "nebula" => &PALETTE_NEBULA,

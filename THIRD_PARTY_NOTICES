@@ -1,0 +1,117 @@
+Adapted animation algorithms
+===========================
+
+termflix
+--------
+Upstream: https://github.com/paulrobello/termflix
+Revision: f2f2a3abe818bc0f85986c66de5750ef13cd1e59
+Source paths: src/animations/matrix.rs, src/animations/starfield.rs,
+              src/animations/plasma.rs, src/animations/fire.rs
+Adapted into: src/presets/matrix.rs, starfield.rs, plasma.rs, fire.rs
+
+Adapted portions are the falling-stream/head/trail model, forward-depth
+perspective model, overlapping spatial/temporal sine and cosine field, and
+pull-from-below heat recurrence. This application replaces upstream terminal
+transport, per-frame random draws and simulation timing with ASCII cells,
+seeded state, accepted-time motion, local collision resolution and fixed fire
+steps. No media assets, Unicode glyph catalogue, or terminal framework copied.
+License source:
+https://raw.githubusercontent.com/paulrobello/termflix/f2f2a3abe818bc0f85986c66de5750ef13cd1e59/LICENSE
+
+MIT License
+
+Copyright (c) 2025 Paul Robello
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+TUIOS
+-----
+Upstream: https://github.com/Gaurav-Gosain/tuios
+Revision: e57ecf3741f8884dd6d033b70188160965bd1a3d
+Source path: internal/app/celebrate.go
+Adapted into: src/presets/confetti.rs
+
+Adapted portions are the upward launch cone and randomized velocity,
+closed-form linear drag/gravity position, sideways wobble, staggered births,
+1–1.5 second lifetimes, glyph fading, and 400-particle population ceiling.
+The Preset repeats bursts on the shared simulation clock. ASCII glyphs
+replace upstream Unicode shapes. No Bubble Tea scheduling, window-manager
+behavior, terminal transport, or guided-tour integration copied.
+License source:
+https://raw.githubusercontent.com/Gaurav-Gosain/tuios/e57ecf3741f8884dd6d033b70188160965bd1a3d/LICENSE
+
+MIT License
+
+Copyright (c) 2025 Gaurav Gosain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ttfx and TerminalTextEffects
+---------------------------
+Upstream: https://github.com/omacom/ttfx
+Revision: 921bd551c308c235e01c5867f0199efe0691c271
+Source paths: src/effects/decrypt.rs, src/effects/scattered.rs
+Adapted into: src/presets/text_art.rs
+
+Adapted portions are per-target ciphertext scenes with randomized discovery,
+and random-start eased paths back to occupied target glyphs. The adaptation
+uses the application's configured FIGlet bitmap and analytic age-based cells,
+not the upstream effects engine. ttfx is a Rust port of TerminalTextEffects
+by ChrisBuilds; both upstream attribution lines are retained below.
+License source:
+https://raw.githubusercontent.com/omacom/ttfx/921bd551c308c235e01c5867f0199efe0691c271/LICENSE
+
+MIT License
+
+Copyright (c) 2026 37signals / omacom-io
+Copyright (c) 2023 ChrisBuilds (TerminalTextEffects, from which this is ported)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

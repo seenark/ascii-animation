@@ -60,46 +60,225 @@ impl TerminalDriver for CrosstermDriver {
     }
 }
 
-pub fn render_scene_frame(
-    scene: &Scene,
-    registry: &PresetRegistry,
+/// Stable live identity. Serialized display identifiers are deliberately not keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryId(u64);
+
+struct RuntimeEntry {
+    id: EntryId,
     seed: u64,
-    elapsed_seconds: f64,
-    width: u16,
-    height: u16,
-) -> Result<FrameBuffer> {
-    let mut frame = FrameBuffer::new(width, height);
-    for (order, instance) in scene.instances.iter().enumerate() {
-        if !instance.enabled {
-            continue;
-        }
-        let descriptor = registry.get(&instance.preset)?;
-        let (desired_width, desired_height) = desired_dimensions(instance, width, height);
-        let rect = resolve_placement(
-            &instance.placement,
-            width,
-            height,
-            desired_width,
-            desired_height,
-        );
-        let mut renderer =
-            descriptor.create_renderer(&instance.options, seed.wrapping_add(order as u64))?;
-        renderer.render(
-            &mut frame,
-            RenderContext {
-                elapsed_seconds,
-                layer: instance.layer,
-                z_index: instance.z_index,
-                order,
-                x_offset: rect.x,
-                y_offset: rect.y,
-                width: rect.width,
-                height: rect.height,
-            },
-        );
-    }
-    Ok(frame)
+    epoch: Duration,
+    renderer: Box<dyn crate::render::AnimationRenderer>,
+    rect: crate::render::Rect,
+    frame: FrameBuffer,
 }
+
+pub struct SceneSession {
+    scene: Scene,
+    registry: PresetRegistry,
+    seed: u64,
+    next_ordinal: u64,
+    elapsed: Duration,
+    paused: bool,
+    entries: Vec<RuntimeEntry>,
+    logical: FrameBuffer,
+    viewport: FrameBuffer,
+}
+
+impl SceneSession {
+    pub fn new(scene: Scene, registry: &PresetRegistry, seed: u64) -> Result<Self> {
+        let mut session = Self {
+            scene: Scene::default(),
+            registry: registry.clone(),
+            seed,
+            next_ordinal: 0,
+            elapsed: Duration::ZERO,
+            paused: false,
+            entries: Vec::new(),
+            logical: FrameBuffer::new(0, 0),
+            viewport: FrameBuffer::new(0, 0),
+        };
+        let identities = vec![None; scene.instances.len()];
+        session.apply_scene(scene, &identities)?;
+        Ok(session)
+    }
+
+    pub fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    pub fn entry_ids(&self) -> Vec<EntryId> {
+        self.entries.iter().map(|entry| entry.id).collect()
+    }
+
+    pub fn elapsed_seconds(&self) -> f64 {
+        self.elapsed.as_secs_f64()
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+    }
+
+    /// Accept a wall-time delta, discarding stalls instead of retaining backlog.
+    pub fn advance(&mut self, delta: Duration) {
+        if !self.paused {
+            let interval = Duration::from_secs_f64(1.0 / self.scene.frame_rate.max(1) as f64);
+            self.elapsed += delta.min(Duration::from_millis(100).max(interval));
+        }
+    }
+
+    /// Commit an edited Scene. Move identities with instances; use None for new entries.
+    /// Returns identities whose simulation intentionally restarted.
+    pub fn apply_scene(
+        &mut self,
+        mut scene: Scene,
+        identities: &[Option<EntryId>],
+    ) -> Result<Vec<EntryId>> {
+        if scene.instances.is_empty() {
+            return Err(AsciiAnimError::EmptyScene);
+        }
+        if identities.len() != scene.instances.len() {
+            return Err(AsciiAnimError::Terminal("runtime entry count does not match Scene".into()));
+        }
+        for (index, identity) in identities.iter().enumerate() {
+            if let Some(id) = identity {
+                if identities[..index].contains(&Some(*id))
+                    || !self.entries.iter().any(|entry| entry.id == *id)
+                {
+                    return Err(AsciiAnimError::Terminal("invalid live animation identity".into()));
+                }
+            }
+        }
+        for instance in &mut scene.instances {
+            let descriptor = self.registry.get(&instance.preset)
+                .map_err(|error| instance_error(instance, error))?;
+            instance.options = descriptor.validate_options(&instance.options)
+                .map_err(|error| instance_error(instance, error))?;
+        }
+        let (width, height) = logical_scene_dimensions(&scene, &self.registry)?;
+        let mut replacements = Vec::with_capacity(scene.instances.len());
+        let mut next_ordinal = self.next_ordinal;
+        let mut restarted = Vec::new();
+        for (instance, identity) in scene.instances.iter().zip(identities) {
+            let descriptor = self.registry.get(&instance.preset)?;
+            let (desired_width, desired_height) = desired_dimensions(instance, width, height);
+            let rect = resolve_placement(&instance.placement, width, height, desired_width, desired_height);
+            let existing = identity.and_then(|id| self.entries.iter().position(|entry| entry.id == id));
+            let needs_rebuild = match existing {
+                None => true,
+                Some(index) => {
+                    let previous = &self.scene.instances[index];
+                    let entry = &self.entries[index];
+                    previous.preset != instance.preset
+                        || descriptor.options().iter().any(|option| {
+                            option.rebuilds_state()
+                                && previous.options.get(option.name()) != instance.options.get(option.name())
+                        })
+                        || (entry.renderer.depends_on_dimensions()
+                            && (entry.rect.width, entry.rect.height) != (rect.width, rect.height))
+                }
+            };
+            let replacement = if needs_rebuild {
+                let (id, seed) = match existing {
+                    Some(index) => (self.entries[index].id, self.entries[index].seed),
+                    None => {
+                        let ordinal = next_ordinal;
+                        next_ordinal += 1;
+                        (EntryId(ordinal), self.seed.wrapping_add(ordinal))
+                    }
+                };
+                let renderer = descriptor.create_renderer(&instance.options, seed)
+                    .map_err(|error| instance_error(instance, error))?;
+                restarted.push(id);
+                Some(RuntimeEntry {
+                    id, seed, epoch: self.elapsed, renderer, rect,
+                    frame: FrameBuffer::new(rect.width, rect.height),
+                })
+            } else {
+                None
+            };
+            replacements.push((existing, rect, replacement));
+        }
+        // All construction and validation succeeds before touching retained entries.
+        // Catch up accepted time using old settings before applying a live change.
+        self.render_entries();
+        let mut reconfigured: Vec<usize> = Vec::new();
+        for (new_index, (existing, _, replacement)) in replacements.iter().enumerate() {
+            if replacement.is_none() {
+                let index = existing.expect("retained entry has identity");
+                if self.scene.instances[index].options != scene.instances[new_index].options {
+                    if let Err(error) = self.entries[index].renderer.reconfigure(&scene.instances[new_index].options) {
+                        for restored in reconfigured {
+                            self.entries[restored].renderer.reconfigure(&self.scene.instances[restored].options)?;
+                        }
+                        return Err(instance_error(&scene.instances[new_index], error));
+                    }
+                    reconfigured.push(index);
+                }
+            }
+        }
+        let mut previous = std::mem::take(&mut self.entries).into_iter().map(Some).collect::<Vec<_>>();
+        self.entries = replacements.into_iter().map(|(existing, rect, replacement)| {
+            let mut entry = replacement.unwrap_or_else(|| previous[existing.unwrap()].take().unwrap());
+            entry.rect = rect;
+            entry
+        }).collect();
+        self.next_ordinal = next_ordinal;
+        self.scene = scene;
+        self.logical.reset(width, height);
+        Ok(restarted)
+    }
+
+    pub fn canvas_dimensions(&self) -> (u16, u16) {
+        (self.logical.width(), self.logical.height())
+    }
+
+    /// Draw current accepted time. Viewport-only changes do not change simulation state.
+    pub fn draw(&mut self, viewport_width: u16, viewport_height: u16) -> Result<&FrameBuffer> {
+        self.render_entries();
+        center_frame_into(&self.logical, &mut self.viewport, viewport_width, viewport_height);
+        Ok(&self.viewport)
+    }
+
+    fn render_entries(&mut self) {
+        self.logical.reset(self.logical.width(), self.logical.height());
+        for (order, (entry, instance)) in self.entries.iter_mut().zip(&self.scene.instances).enumerate() {
+            let rect = entry.rect;
+            entry.frame.reset(rect.width, rect.height);
+            entry.renderer.render(&mut entry.frame, RenderContext {
+                elapsed_seconds: self.elapsed.saturating_sub(entry.epoch).as_secs_f64(),
+                layer: crate::scene::Layer::Normal, z_index: 0, order: 0,
+                x_offset: 0, y_offset: 0, width: rect.width, height: rect.height,
+            });
+            if instance.enabled {
+                for y in 0..rect.height {
+                    for x in 0..rect.width {
+                        if let Some(cell) = entry.frame.get(x, y) {
+                            let mut cell = *cell;
+                            cell.layer = instance.layer;
+                            cell.z_index = instance.z_index;
+                            cell.order = order;
+                            self.logical.put_cell(rect.x + x, rect.y + y, cell);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn instance_error(instance: &AnimationInstance, error: AsciiAnimError) -> AsciiAnimError {
+    AsciiAnimError::AnimationInstance {
+        id: instance.id.clone(),
+        preset: instance.preset.clone(),
+        source: Box::new(error),
+    }
+}
+
 
 pub fn logical_scene_dimensions(scene: &Scene, registry: &PresetRegistry) -> Result<(u16, u16)> {
     let mut width = DEFAULT_SCENE_WIDTH;
@@ -121,28 +300,9 @@ pub fn logical_scene_dimensions(scene: &Scene, registry: &PresetRegistry) -> Res
     Ok((width, height))
 }
 
-pub fn render_centered_scene_frame(
-    scene: &Scene,
-    registry: &PresetRegistry,
-    seed: u64,
-    elapsed_seconds: f64,
-    viewport_width: u16,
-    viewport_height: u16,
-) -> Result<FrameBuffer> {
-    let (logical_width, logical_height) = logical_scene_dimensions(scene, registry)?;
-    let logical = render_scene_frame(
-        scene,
-        registry,
-        seed,
-        elapsed_seconds,
-        logical_width,
-        logical_height,
-    )?;
-    Ok(center_frame(&logical, viewport_width, viewport_height))
-}
 
-fn center_frame(source: &FrameBuffer, viewport_width: u16, viewport_height: u16) -> FrameBuffer {
-    let mut frame = FrameBuffer::new(viewport_width, viewport_height);
+fn center_frame_into(source: &FrameBuffer, frame: &mut FrameBuffer, viewport_width: u16, viewport_height: u16) {
+    frame.reset(viewport_width, viewport_height);
     let copy_width = source.width().min(viewport_width);
     let copy_height = source.height().min(viewport_height);
     let source_x = source.width().saturating_sub(copy_width) / 2;
@@ -160,7 +320,6 @@ fn center_frame(source: &FrameBuffer, viewport_width: u16, viewport_height: u16)
         }
     }
 
-    frame
 }
 
 pub fn scene_viewport_size_for_terminal(
@@ -169,15 +328,19 @@ pub fn scene_viewport_size_for_terminal(
     terminal_width: u16,
     terminal_height: u16,
 ) -> Result<(u16, u16)> {
+    let (logical_width, _) = logical_scene_dimensions(scene, registry)?;
+    Ok(viewport_for_canvas(logical_width, terminal_width, terminal_height))
+}
+
+fn viewport_for_canvas(logical_width: u16, terminal_width: u16, terminal_height: u16) -> (u16, u16) {
     let (base_width, base_height) =
         animation_viewport_size_for_terminal(terminal_width, terminal_height);
-    let (logical_width, _) = logical_scene_dimensions(scene, registry)?;
     let expanded_width = if logical_width > DEFAULT_SCENE_WIDTH {
         logical_width.min(terminal_width)
     } else {
         base_width
     };
-    Ok((base_width.max(expanded_width), base_height))
+    (base_width.max(expanded_width), base_height)
 }
 
 pub fn prepare_scene_terminal<W: Write, T: TerminalDriver>(
@@ -230,8 +393,10 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
     registry: &PresetRegistry,
     seed: u64,
 ) -> Result<()> {
-    let start = Instant::now();
-    let frame_duration = Duration::from_millis(1000 / scene.frame_rate.max(1) as u64);
+    let frame_duration = Duration::from_secs_f64(1.0 / scene.frame_rate.max(1) as f64);
+    let color = scene.color;
+    let mut session = SceneSession::new(scene, registry, seed)?;
+    let mut last_tick = Instant::now();
 
     loop {
         if terminal
@@ -244,19 +409,15 @@ fn run_scene_loop<W: Write, T: TerminalDriver>(
 
         let (terminal_width, terminal_height) = terminal.size().map_err(terminal_error)?;
         let (viewport_width, viewport_height) =
-            scene_viewport_size_for_terminal(&scene, registry, terminal_width, terminal_height)?;
-        let frame = render_centered_scene_frame(
-            &scene,
-            registry,
-            seed,
-            start.elapsed().as_secs_f64(),
-            viewport_width,
-            viewport_height,
-        )?;
+            viewport_for_canvas(session.canvas_dimensions().0, terminal_width, terminal_height);
+        let now = Instant::now();
+        session.advance(now.duration_since(last_tick));
+        last_tick = now;
+        let frame = session.draw(viewport_width, viewport_height)?;
         let x_offset = terminal_width.saturating_sub(viewport_width) / 2;
         let y_offset = terminal_height.saturating_sub(viewport_height) / 2;
         execute!(stdout, MoveTo(0, 0), Clear(ClearType::All)).map_err(terminal_error)?;
-        write_positioned_frame(stdout, &frame, scene.color, x_offset, y_offset)?;
+        write_positioned_frame(stdout, frame, color, x_offset, y_offset)?;
         stdout.flush().map_err(terminal_error)?;
         std::thread::sleep(frame_duration);
     }
@@ -366,7 +527,12 @@ mod tests {
         Scene {
             frame_rate: 1000,
             color: false,
-            instances: Vec::new(),
+            instances: vec![AnimationInstance {
+                id: "galaxy-1".into(), preset: "galaxy".into(),
+                options: crate::presets::galaxy::descriptor().defaults(),
+                placement: Placement::Center, layer: crate::scene::Layer::Normal,
+                z_index: 0, enabled: true,
+            }],
         }
     }
 

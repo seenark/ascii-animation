@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
@@ -100,9 +102,13 @@ impl Scene {
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self> {
+        Self::load_from_path_raw(path)?.validate()
+    }
+
+    pub fn load_from_path_raw(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|source| AsciiAnimError::Terminal(source.to_string()))?;
-        Self::parse_config_text(path, &text)?.validate()
+        Self::parse_config_text(path, &text)
     }
 
     fn parse_config_text(path: &Path, text: &str) -> Result<Self> {
@@ -113,15 +119,44 @@ impl Scene {
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|source| AsciiAnimError::SceneConfigWrite {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        }
+        static NEXT_WRITE: AtomicU64 = AtomicU64::new(0);
         let text = toml::to_string_pretty(self)
             .map_err(|source| AsciiAnimError::Terminal(source.to_string()))?;
-        std::fs::write(path, text).map_err(|source| AsciiAnimError::SceneConfigWrite {
+        let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
+        let save = || -> std::io::Result<()> {
+            std::fs::create_dir_all(parent)?;
+            let filename = path.file_name().ok_or_else(|| std::io::Error::new(
+                std::io::ErrorKind::InvalidInput, "Scene path must name a file",
+            ))?;
+            let mut temporary_name = std::ffi::OsString::from(".");
+            temporary_name.push(filename);
+            temporary_name.push(format!(".{}.{}.tmp", std::process::id(), NEXT_WRITE.fetch_add(1, Ordering::Relaxed)));
+            let temporary = parent.join(temporary_name);
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&temporary)?;
+            let result = (|| {
+                if let Ok(metadata) = std::fs::metadata(path) {
+                    if metadata.is_file() {
+                        file.set_permissions(metadata.permissions())?;
+                    }
+                }
+                file.write_all(text.as_bytes())?;
+                file.sync_all()?;
+                drop(file);
+                std::fs::rename(&temporary, path)
+            })();
+            if result.is_err() {
+                let _ = std::fs::remove_file(&temporary);
+            }
+            result
+        };
+        save().map_err(|source| AsciiAnimError::SceneConfigWrite {
             path: path.to_path_buf(),
             source,
         })

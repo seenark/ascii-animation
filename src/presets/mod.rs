@@ -5,6 +5,12 @@ use crate::{AsciiAnimError, Result};
 
 pub mod galaxy;
 pub mod text_art;
+pub mod confetti;
+pub mod fire;
+pub mod matrix;
+mod palette;
+pub mod plasma;
+pub mod starfield;
 
 pub type RendererFactory =
     fn(&BTreeMap<String, OptionValue>, u64) -> Result<Box<dyn AnimationRenderer>>;
@@ -42,6 +48,14 @@ pub enum OptionKind {
     Text { max_len: usize },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionGroup {
+    Basics,
+    Motion,
+    Style,
+    Layout,
+}
+
 #[derive(Debug, Clone)]
 pub struct OptionDescriptor {
     name: String,
@@ -49,6 +63,8 @@ pub struct OptionDescriptor {
     default: OptionValue,
     kind: OptionKind,
     rebuilds_state: bool,
+    group: OptionGroup,
+    help: String,
 }
 
 impl OptionDescriptor {
@@ -78,6 +94,8 @@ impl OptionDescriptor {
             default: OptionValue::Int(default),
             kind: OptionKind::Int { min, max, step },
             rebuilds_state,
+            group: legacy_group(name),
+            help: legacy_help(name).to_string(),
         }
     }
 
@@ -95,6 +113,8 @@ impl OptionDescriptor {
             default: OptionValue::Float(default),
             kind: OptionKind::Float { min, max },
             rebuilds_state,
+            group: legacy_group(name),
+            help: legacy_help(name).to_string(),
         }
     }
 
@@ -105,6 +125,8 @@ impl OptionDescriptor {
             default: OptionValue::Bool(default),
             kind: OptionKind::Bool,
             rebuilds_state,
+            group: legacy_group(name),
+            help: legacy_help(name).to_string(),
         }
     }
 
@@ -123,6 +145,8 @@ impl OptionDescriptor {
                 choices: choices.into_iter().map(str::to_string).collect(),
             },
             rebuilds_state,
+            group: legacy_group(name),
+            help: legacy_help(name).to_string(),
         }
     }
 
@@ -139,6 +163,8 @@ impl OptionDescriptor {
             default: OptionValue::Text(default.to_string()),
             kind: OptionKind::Text { max_len },
             rebuilds_state,
+            group: legacy_group(name),
+            help: legacy_help(name).to_string(),
         }
     }
 
@@ -156,6 +182,24 @@ impl OptionDescriptor {
     }
     pub fn rebuilds_state(&self) -> bool {
         self.rebuilds_state
+    }
+
+    pub fn group(&self) -> OptionGroup {
+        self.group
+    }
+
+    pub fn help(&self) -> &str {
+        &self.help
+    }
+
+    pub fn with_group(mut self, group: OptionGroup) -> Self {
+        self.group = group;
+        self
+    }
+
+    pub fn with_help(mut self, help: &str) -> Self {
+        self.help = help.to_string();
+        self
     }
 
     fn validate(&self, preset: &str, value: OptionValue) -> Result<OptionValue> {
@@ -257,6 +301,7 @@ pub struct PresetDescriptor {
     options: Vec<OptionDescriptor>,
     renderer_factory: RendererFactory,
     logical_width_hint_factory: Option<LogicalWidthHintFactory>,
+    option_visibility: Option<fn(&str, &BTreeMap<String, OptionValue>) -> bool>,
 }
 
 impl PresetDescriptor {
@@ -274,6 +319,7 @@ impl PresetDescriptor {
             options,
             renderer_factory,
             logical_width_hint_factory: None,
+            option_visibility: None,
         }
     }
 
@@ -288,6 +334,24 @@ impl PresetDescriptor {
     }
     pub fn options(&self) -> &[OptionDescriptor] {
         &self.options
+    }
+
+    pub fn with_option_visibility(
+        mut self,
+        visibility: fn(&str, &BTreeMap<String, OptionValue>) -> bool,
+    ) -> Self {
+        self.option_visibility = Some(visibility);
+        self
+    }
+
+    pub fn visible_options(
+        &self,
+        options: &BTreeMap<String, OptionValue>,
+    ) -> Vec<&OptionDescriptor> {
+        self.options
+            .iter()
+            .filter(|option| self.option_visibility.map_or(true, |visible| visible(option.name(), options)))
+            .collect()
     }
 
     pub fn create_renderer(
@@ -380,12 +444,20 @@ impl PresetRegistry {
 
 impl Default for PresetRegistry {
     fn default() -> Self {
-        Self::new(vec![galaxy::descriptor(), text_art::descriptor()])
+        Self::new(vec![
+            galaxy::descriptor(),
+            text_art::descriptor(),
+            matrix::descriptor(),
+            starfield::descriptor(),
+            plasma::descriptor(),
+            fire::descriptor(),
+            confetti::descriptor(),
+        ])
     }
 }
 
 pub fn build_default_registry() -> PresetRegistry {
-    PresetRegistry::new(vec![galaxy::descriptor(), text_art::descriptor()])
+    PresetRegistry::default()
 }
 
 fn trim_float(value: f64) -> String {
@@ -399,4 +471,29 @@ fn trim_float(value: f64) -> String {
         }
     }
     text
+}
+
+fn legacy_group(name: &str) -> OptionGroup {
+    match name {
+        "speed" | "twinkle" => OptionGroup::Motion,
+        "glow" | "palette" | "gradient" => OptionGroup::Style,
+        "size" => OptionGroup::Layout,
+        _ => OptionGroup::Basics,
+    }
+}
+
+fn legacy_help(name: &str) -> &'static str {
+    match name {
+        "arms" => "Number of spiral arms; changing this restarts this Animation instance.",
+        "stars" => "Seeded star population; changing this restarts this Animation instance.",
+        "speed" => "Rotation speed in degrees per second.",
+        "size" => "Galaxy radius as a percentage of its Placement.",
+        "twist" => "Spiral winding from the center toward the outer stars.",
+        "noise" => "Seeded deviation from the spiral arms.",
+        "glow" => "Boost the visible density of star glyphs.",
+        "twinkle" => "Amount of periodic star brightness variation.",
+        "palette" => "Star colors; glyph density remains readable without color.",
+        "gradient" => "Glyph ramp used for star brightness.",
+        _ => "",
+    }
 }
