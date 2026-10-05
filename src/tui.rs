@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -112,7 +113,27 @@ pub struct TuiState {
 }
 
 pub fn format_tui_option_value(value: &OptionValue) -> String {
-    match value { OptionValue::Float(v) => format!("{v:.2}"), other => other.as_cli_value() }
+    ValueLabel::Stored(value).to_string()
+}
+enum ValueLabel<'a> { Stored(&'a OptionValue), Int(i64), Bool(bool), Text(&'a str) }
+impl std::fmt::Display for ValueLabel<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stored(OptionValue::Int(value)) | Self::Int(value) => std::fmt::Display::fmt(value, formatter),
+            Self::Stored(OptionValue::Float(value)) => write!(formatter, "{value:.2}"),
+            Self::Stored(OptionValue::Bool(value)) | Self::Bool(value) => std::fmt::Display::fmt(value, formatter),
+            Self::Stored(OptionValue::Choice(value) | OptionValue::Text(value)) => formatter.write_str(value),
+            Self::Text(value) => formatter.write_str(value),
+        }
+    }
+}
+fn preview_error_text(error: &AsciiAnimError, status: &mut Option<String>) -> Text<'static> {
+    let message = error.to_string();
+    let text = Text::from(message.lines().map(|line| {
+        if line.is_empty() { Line::default() } else { Line::from(Span::raw(line.to_owned())) }
+    }).collect::<Vec<_>>());
+    *status = Some(message);
+    text
 }
 
 impl TuiState {
@@ -252,7 +273,7 @@ impl TuiState {
         // Draw the live session even behind a draft so stateful entries continue advancing.
         let live = self.session.draw(width, height);
         match live {
-            Err(err) => { self.status = Some(err.to_string()); Text::from(err.to_string()) }
+            Err(err) => preview_error_text(&err, &mut self.status),
             Ok(frame) => {
                 if matches!(self.dialog, Dialog::Saved(_)) && self.temporary.is_none() {
                     return Text::from("Preview unavailable. Select a readable Saved Scene or choose New. e shows error details; r retries reading.");
@@ -265,7 +286,7 @@ impl TuiState {
                     let color = temporary.scene().color;
                     match temporary.draw(width, height) {
                         Ok(frame) => frame_to_text(frame, color),
-                        Err(err) => { self.status = Some(err.to_string()); Text::from(err.to_string()) }
+                        Err(err) => preview_error_text(&err, &mut self.status),
                     }
                 } else { frame_to_text(frame, self.scene.color) }
             }
@@ -383,16 +404,29 @@ impl TuiState {
         Ok(())
     }
     fn field_value(&self, name: &str) -> Option<OptionValue> {
+        self.field_label(name).map(|value| match value {
+            ValueLabel::Stored(value) => value.clone(),
+            ValueLabel::Int(value) => OptionValue::Int(value),
+            ValueLabel::Bool(value) => OptionValue::Bool(value),
+            ValueLabel::Text(value) => OptionValue::Choice(value.into()),
+        })
+    }
+    fn field_label(&self, name: &str) -> Option<ValueLabel<'_>> {
         let instance = self.selected_instance();
         match name {
-            "frame-rate" => Some(OptionValue::Int(self.scene.frame_rate as i64)),
-            "color" => Some(OptionValue::Bool(self.scene.color)),
-            "enabled" => Some(OptionValue::Bool(instance.enabled)),
-            "placement" => Some(OptionValue::Choice(placement_label(&instance.placement).into())),
-            "layer" => Some(OptionValue::Choice(layer_label(instance.layer).into())),
-            "z-index" => Some(OptionValue::Int(instance.z_index as i64)),
-            "placement-x" | "placement-y" | "placement-width" | "placement-height" => custom_value(&instance.placement, name),
-            _ => instance.options.get(name).cloned(),
+            "frame-rate" => Some(ValueLabel::Int(self.scene.frame_rate as i64)),
+            "color" => Some(ValueLabel::Bool(self.scene.color)),
+            "enabled" => Some(ValueLabel::Bool(instance.enabled)),
+            "placement" => Some(ValueLabel::Text(placement_label(&instance.placement))),
+            "layer" => Some(ValueLabel::Text(layer_label(instance.layer))),
+            "z-index" => Some(ValueLabel::Int(instance.z_index as i64)),
+            "placement-x" | "placement-y" | "placement-width" | "placement-height" => {
+                match custom_value(&instance.placement, name) {
+                    Some(OptionValue::Int(value)) => Some(ValueLabel::Int(value)),
+                    _ => None,
+                }
+            }
+            _ => instance.options.get(name).map(ValueLabel::Stored),
         }
     }
     fn sync_selected_options(&mut self, registry: &PresetRegistry) -> Result<()> {
@@ -423,7 +457,7 @@ impl TuiState {
         if let Some(field) = self.fields.get(self.selected_option) {
             if matches!(field.kind, OptionKind::Text { .. } | OptionKind::Choice { .. }) {
                 let value = self.field_value(&field.name).unwrap();
-                let cursor = value.as_cli_value().len();
+                let cursor = match &value { OptionValue::Text(text) | OptionValue::Choice(text) => text.len(), _ => value.as_cli_value().len() };
                 self.open(Dialog::Editor(Draft { name: field.name.clone(), value, cursor, error: None }));
             }
         }
@@ -1111,7 +1145,7 @@ fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
         if x + width > area.right() { x = area.x; y += 1; }
         if y >= area.bottom() { break; }
         let target = Rect::new(x, y, width, 1);
-        frame.render_widget(Paragraph::new(text).style(Style::default().fg(MUTED)), target);
+        frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(MUTED)), target);
         state.hit_targets.push(HitTarget { area: target, action: HitAction::Key(*key) });
         x += width + 1;
     }
@@ -1267,7 +1301,8 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, registry: &Pr
     }
 }
 
-fn panel(title: String, focused: bool) -> Block<'static> {
+fn panel<'a>(title: impl Into<Line<'a>>, focused: bool) -> Block<'a> {
+    let title: Line<'a> = title.into();
     Block::default().title(title).borders(Borders::ALL).border_style(Style::default().fg(if focused { AMBER } else { MUTED }))
 }
 /// Draws the actual TUI and records only visible, current mouse targets.
@@ -1294,8 +1329,10 @@ pub fn render_tui(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut 
     let browsing = matches!(state.dialog, Dialog::Browser(_) | Dialog::Saved(_));
     let compact = editor_layout(area.width, area.height) == EditorLayout::Small;
     let browser_preview = match &state.dialog { Dialog::Browser(browser) => browser.previewing, Dialog::Saved(browser) => browser.previewing, _ => false };
-    let title = if fullscreen { "Fullscreen playback".into() } else {
-        format!("{} | {} | {}", if state.is_dirty() { "unsaved" } else { "saved" }, if state.is_paused() { "paused" } else { "running" }, state.saved_name.as_deref().unwrap_or("New Scene"))
+    let generated_title;
+    let title = if fullscreen { "Fullscreen playback" } else {
+        generated_title = format!("{} | {} | {}", if state.is_dirty() { "unsaved" } else { "saved" }, if state.is_paused() { "paused" } else { "running" }, state.saved_name.as_deref().unwrap_or("New Scene"));
+        generated_title.as_str()
     };
     frame.render_widget(Paragraph::new(title).style(Style::default().fg(AMBER)), Rect::new(area.x, area.y, area.width, 1));
     let preview_area = if fullscreen { Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(4)) } else { layout.preview };
@@ -1306,7 +1343,11 @@ pub fn render_tui(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut 
             frame.render_widget(Paragraph::new(preview), preview_area);
         } else {
             let cropped = width > preview_area.width.saturating_sub(2) || height > preview_area.height.saturating_sub(2);
-            frame.render_widget(Paragraph::new(preview).block(panel(format!("{}Live preview{}", if state.focus == PaneFocus::Preview { "> " } else { "" }, if cropped { " [Canvas cropped]" } else { "" }), state.focus == PaneFocus::Preview)), preview_area);
+            let title = match (state.focus == PaneFocus::Preview, cropped) {
+                (true, true) => "> Live preview [Canvas cropped]", (true, false) => "> Live preview",
+                (false, true) => "Live preview [Canvas cropped]", (false, false) => "Live preview",
+            };
+            frame.render_widget(Paragraph::new(preview).block(panel(title, state.focus == PaneFocus::Preview)), preview_area);
         }
         if !browsing && matches!(state.dialog, Dialog::None) && !fullscreen {
             state.hit_targets.push(HitTarget { area: preview_area, action: HitAction::Focus(PaneFocus::Preview) });
@@ -1326,44 +1367,70 @@ fn keep_visible(scroll: &mut usize, selected: usize, count: usize) {
     else if selected >= scroll.saturating_add(count) { *scroll = selected + 1 - count; }
 }
 fn draw_scene(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
-    let block = panel(format!("> Animations ({})", state.scene.instances.len()), true);
+    let title = format!("> Animations ({})", state.scene.instances.len());
+    let block = panel(title.as_str(), true);
     let inner = block.inner(area);
     keep_visible(&mut state.scene_scroll, state.selected_instance, inner.height as usize);
     frame.render_widget(block, area);
     for (row, (index, instance)) in state.scene.instances.iter().enumerate().skip(state.scene_scroll).take(inner.height as usize).enumerate() {
         let target = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-        frame.render_widget(Paragraph::new(format!("{} [{}] {} ({})", if index == state.selected_instance { ">" } else { " " }, if instance.enabled { "on" } else { "off" }, instance.id, instance.preset)), target);
+        let text = format!("{} [{}] {} ({})", if index == state.selected_instance { ">" } else { " " }, if instance.enabled { "on" } else { "off" }, instance.id, instance.preset);
+        frame.render_widget(Paragraph::new(text.as_str()), target);
         state.hit_targets.push(HitTarget { area: target, action: HitAction::Instance(index) });
     }
 }
 fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
-    let mut lines = Vec::new(); let mut indices = Vec::new(); let mut group = None; let mut selected_row = 0;
+    let mut group = None; let mut selected_row = 0; let mut row = 0;
     for (index, field) in state.fields.iter().enumerate() {
         if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
-        if group != Some(group_index(field.group)) {
-            lines.push(Line::styled(group_label(field.group), Style::default().fg(MUTED)));
-            indices.push(None); group = Some(group_index(field.group));
-        }
-        if index == state.selected_option { selected_row = lines.len(); }
-        let value = state.field_value(&field.name).map(|v| format_tui_option_value(&v)).unwrap_or_default();
-        lines.push(Line::styled(format!("{} {}: {}{}", if index == state.selected_option { ">" } else { " " }, field.label, value, if field.rebuilds { " [restart]" } else { "" }),
-            Style::default().fg(if index == state.selected_option { AMBER } else { PAPER })));
-        indices.push(Some(index));
+        if group != Some(group_index(field.group)) { row += 1; group = Some(group_index(field.group)); }
+        if index == state.selected_option { selected_row = row; }
+        row += 1;
     }
     let help_height = if area.height >= 10 { 3 } else { 1 };
     let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(help_height));
-    let block = panel(format!("{}Options: {}", if state.focus == PaneFocus::Inspector { "> " } else { "" }, state.selected_instance().preset), state.focus == PaneFocus::Inspector);
+    let title = format!("{}Options: {}", if state.focus == PaneFocus::Inspector { "> " } else { "" }, state.selected_instance().preset);
+    let block = panel(title.as_str(), state.focus == PaneFocus::Inspector);
     let inner = block.inner(content);
     keep_visible(&mut state.inspector_scroll, selected_row, inner.height as usize);
-    frame.render_widget(Paragraph::new(lines).scroll((state.inspector_scroll.min(u16::MAX as usize) as u16, 0)).block(block), content);
-    for (row, index) in indices.iter().skip(state.inspector_scroll).take(inner.height as usize).enumerate() {
-        if let Some(index) = index {
-            state.hit_targets.push(HitTarget { area: Rect::new(inner.x, inner.y + row as u16, inner.width, 1), action: HitAction::Field(*index) });
+    frame.render_widget(block, content);
+    let scroll = state.inspector_scroll.min(u16::MAX as usize);
+    let end = scroll.saturating_add(inner.height as usize);
+    let target_for = |row: usize| (row >= scroll && row < end).then(|| Rect::new(inner.x, inner.y + (row - scroll) as u16, inner.width, 1));
+    let help_area = Rect::new(area.x + 1, content.y + content.height, area.width.saturating_sub(2), help_height);
+    let mut text = String::new(); let mut guidance_drawn = false;
+    group = None; row = 0;
+    for (index, field) in state.fields.iter().enumerate() {
+        if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
+        if group != Some(group_index(field.group)) {
+            if let Some(target) = target_for(row) {
+                frame.render_widget(Line::styled(group_label(field.group), Style::default().fg(MUTED)), target);
+            }
+            row += 1; group = Some(group_index(field.group));
         }
+        if let Some(target) = target_for(row) {
+            text.clear();
+            let _ = write!(text, "{} {}: ", if index == state.selected_option { ">" } else { " " }, field.label);
+            if let Some(value) = state.field_label(&field.name) { let _ = write!(text, "{value}"); }
+            let value_end = text.len();
+            if field.rebuilds { text.push_str(" [restart]"); }
+            frame.render_widget(Line::styled(text.as_str(), Style::default().fg(if index == state.selected_option { AMBER } else { PAPER })), target);
+            state.hit_targets.push(HitTarget { area: target, action: HitAction::Field(index) });
+            if index == state.selected_option {
+                text.truncate(value_end); text.push('\n'); text.push_str(&field.help);
+                frame.render_widget(Paragraph::new(&text[2..]).style(Style::default().fg(MUTED)).wrap(Wrap { trim: false }), help_area);
+                guidance_drawn = true;
+            }
+        }
+        row += 1;
     }
-    if let Some(field) = state.fields.get(state.selected_option) {
-        frame.render_widget(Paragraph::new(format!("{}: {}\n{}", field.label, state.field_value(&field.name).map(|v| format_tui_option_value(&v)).unwrap_or_default(), field.help)).style(Style::default().fg(MUTED)).wrap(Wrap { trim: false }),
-            Rect::new(area.x + 1, content.y + content.height, area.width.saturating_sub(2), help_height));
+    if !guidance_drawn {
+        if let Some(field) = state.fields.get(state.selected_option) {
+            text.clear(); let _ = write!(text, "{}: ", field.label);
+            if let Some(value) = state.field_label(&field.name) { let _ = write!(text, "{value}"); }
+            text.push('\n'); text.push_str(&field.help);
+            frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(MUTED)).wrap(Wrap { trim: false }), help_area);
+        }
     }
 }
 fn modal_area(area: Rect, width: u16, height: u16) -> Rect {
@@ -1375,18 +1442,20 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
     let block = panel(match &state.dialog {
         Dialog::Browser(browser) => match browser.purpose { BrowserPurpose::New => "Presets", BrowserPurpose::Add => "Add animation", BrowserPurpose::Replace => "Replace Preset" },
         _ => "Saved Scenes",
-    }.into(), true);
+    }, true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     match &mut state.dialog {
         Dialog::Browser(browser) => {
-            frame.render_widget(Paragraph::new(format!("{}Find: {}", if browser.typing { "> " } else { "  " }, cursor_window(&browser.search, browser.cursor, inner.width.saturating_sub(8) as usize))), Rect::new(inner.x, inner.y, inner.width, 1));
+            let search = format!("{}Find: {}", if browser.typing { "> " } else { "  " }, cursor_window(&browser.search, browser.cursor, inner.width.saturating_sub(8) as usize));
+            frame.render_widget(Paragraph::new(search.as_str()), Rect::new(inner.x, inner.y, inner.width, 1));
             let details = if inner.height >= 8 { 3 } else { 1 };
             let rows = inner.height.saturating_sub(1 + details) as usize;
             let start = browser.selected.saturating_sub(rows.saturating_sub(1));
             for (row, (index, name)) in browser.names.iter().enumerate().skip(start).take(rows).enumerate() {
                 let target = Rect::new(inner.x, inner.y + 1 + row as u16, inner.width, 1);
-                frame.render_widget(Paragraph::new(format!("{} {}", if index == browser.selected { ">" } else { " " }, registry.get(name).expect("registered Preset").label())).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
+                let text = format!("{} {}", if index == browser.selected { ">" } else { " " }, registry.get(name).expect("registered Preset").label());
+                frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
                 state.hit_targets.push(HitTarget { area: target, action: HitAction::Preset(index) });
             }
             let description = browser.names.get(browser.selected).map(|name| registry.get(name).expect("registered Preset").description()).unwrap_or("No matches. / searches; Esc returns.");
@@ -1402,7 +1471,8 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
                 keep_visible(&mut browser.scroll, browser.selected, rows);
                 for (row, (index, entry)) in browser.entries.iter().enumerate().skip(browser.scroll).take(rows).enumerate() {
                     let target = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-                    frame.render_widget(Paragraph::new(format!("{} {}", if index == browser.selected { ">" } else { " " }, entry.name)).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
+                    let text = format!("{} {}", if index == browser.selected { ">" } else { " " }, entry.name);
+                    frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
                     state.hit_targets.push(HitTarget { area: target, action: HitAction::Saved(index) });
                 }
                 if let Some(notice) = notice { frame.render_widget(Paragraph::new(notice).wrap(Wrap { trim: false }), Rect::new(inner.x, inner.y + rows as u16, inner.width, error_height)); }
@@ -1416,14 +1486,19 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
     let modal = modal_area(area, 82, 18);
     frame.render_widget(Clear, modal);
     let help_actions = matches!(state.dialog, Dialog::Help(_)).then(|| available_actions(state, true));
-    let (title, text, scroll) = match &state.dialog {
+    let (title, text, scroll): (Cow<'_, str>, String, u16) = match &state.dialog {
         Dialog::Name { text, cursor, error, .. } => ("Name Saved Scene".into(), format!("{}\n{}\nTyping owns shortcuts. Enter saves; Esc cancels; F1 Help.", cursor_window(text, *cursor, modal.width.saturating_sub(4) as usize), error.as_deref().unwrap_or("1–80 ASCII letters, digits, spaces, - or _. Save preserves configuration, not runtime history.")), 0),
         Dialog::Overwrite(request) => ("Overwrite Saved Scene?".into(), format!("Replace {}?\n{}\nExisting configuration is lost only after a successful save. Enter/y confirms; Esc/n cancels.", request.name, request.path.display()), 0),
         Dialog::SaveError { request, error, scroll } => ("Cannot save Scene".into(), format!("{}\n{}\nUnsaved changes and previous saved target retained.", request.path.display(), error), *scroll),
         Dialog::Editor(draft) => {
             let field = state.fields.iter().find(|f| f.name == draft.name).expect("draft field");
-            let value = match &draft.value { OptionValue::Text(text) => cursor_window(text, draft.cursor, modal.width.saturating_sub(4) as usize), value => format_tui_option_value(value) };
-            (format!("Edit {}", field.label), format!("{value}\n{}\nEnter commits; Esc cancels; F1 Help.\nText: arrows/Home/End; Backspace/Delete.", draft.error.as_deref().unwrap_or(&field.help)), 0)
+            let mut text = String::new();
+            match &draft.value {
+                OptionValue::Text(value) => { let _ = write!(text, "{}", cursor_window(value, draft.cursor, modal.width.saturating_sub(4) as usize)); }
+                value => { let _ = write!(text, "{}", ValueLabel::Stored(value)); }
+            }
+            let _ = write!(text, "\n{}\nEnter commits; Esc cancels; F1 Help.\nText: arrows/Home/End; Backspace/Delete.", draft.error.as_deref().unwrap_or(&field.help));
+            (format!("Edit {}", field.label).into(), text, 0)
         }
         Dialog::ConfirmDelete => ("Delete animation instance?".into(), format!("Remove {} and all configured options?\nEnter/y deletes; Esc/n cancels.", state.selected_instance().id), 0),
         Dialog::ConfirmReplace(name) => ("Replace configured Preset?".into(), format!("Replace {} with {name}? Old Preset options are lost.\nPlacement, Layer and Z-index remain.\nEnter/y confirms; Esc/n cancels.", state.selected_instance().id), 0),
@@ -1452,7 +1527,7 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
                 }
                 Dialog::Editor(draft) => {
                     let field = state.fields.iter().find(|field| field.name == draft.name).expect("draft field");
-                    let _ = write!(text, "\n\n{}: {}\n{}\n{}", field.label, format_tui_option_value(&draft.value), field.help, draft.error.as_deref().unwrap_or("Draft only. Enter commits; Escape cancels."));
+                    let _ = write!(text, "\n\n{}: {}\n{}\n{}", field.label, ValueLabel::Stored(&draft.value), field.help, draft.error.as_deref().unwrap_or("Draft only. Enter commits; Escape cancels."));
                 }
                 Dialog::SaveError { request, error, .. } => {
                     let _ = write!(text, "\n\n{}\n{error}", request.path.display());
@@ -1469,8 +1544,9 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
                 },
                 Dialog::None if state.focus == PaneFocus::Inspector => {
                     if let Some(field) = state.fields.get(state.selected_option) {
-                        let value = state.field_value(&field.name).map(|value| format_tui_option_value(&value)).unwrap_or_default();
-                        let _ = write!(text, "\n\n{}: {}\n{}\nLeft/Right adjusts; Shift adjusts numeric values faster. Enter edits text and choices.", field.label, value, field.help);
+                        let _ = write!(text, "\n\n{}: ", field.label);
+                        if let Some(value) = state.field_label(&field.name) { let _ = write!(text, "{value}"); }
+                        let _ = write!(text, "\n{}\nLeft/Right adjusts; Shift adjusts numeric values faster. Enter edits text and choices.", field.help);
                     }
                 }
                 _ => {},
@@ -1482,26 +1558,44 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
         Dialog::ReadError { error, scroll } => ("Saved Scene read error".into(), format!("{error}\nFile unchanged. r retries; Esc returns; F1 Help."), *scroll),
         _ => return,
     };
-    frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }).scroll((scroll, 0)).block(panel(title, true)), modal);
+    let block = panel(title.as_ref(), true);
+    let inner = block.inner(modal);
+    frame.render_widget(Paragraph::new(text.as_str()).wrap(Wrap { trim: false }).scroll((scroll, 0)).block(block), modal);
     if matches!(state.dialog, Dialog::Help(_)) {
-        let inner = panel(String::new(), true).inner(modal);
         let actions = help_actions.as_ref().expect("Help actions");
         for (row, (_, code)) in actions.clone().skip(scroll as usize).take(inner.height as usize).enumerate() {
             state.hit_targets.push(HitTarget { area: Rect::new(inner.x, inner.y + row as u16, inner.width, 1), action: HitAction::HelpAction(*code) });
         }
     }
 }
-fn cursor_window(text: &str, cursor: usize, width: usize) -> String {
+struct CursorWindow<'a> { before: &'a str, after: &'a str }
+impl std::fmt::Display for CursorWindow<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.before)?; formatter.write_str("|")?; formatter.write_str(self.after)
+    }
+}
+fn cursor_window(text: &str, cursor: usize, width: usize) -> CursorWindow<'_> {
     let cursor = cursor.min(text.len());
     let width = width.max(2);
     let before = text[..cursor].chars().count();
     let skip = before.saturating_sub(width - 1);
     let start = text.char_indices().nth(skip).map(|(index, _)| index).unwrap_or(text.len());
     let end = text[start..].char_indices().nth(width - 1).map(|(index, _)| start + index).unwrap_or(text.len());
-    format!("{}|{}", &text[start..cursor], &text[cursor..end])
+    CursorWindow { before: &text[start..cursor], after: &text[cursor..end] }
 }
-fn selected_buttons(labels: &[&str], choice: usize) -> String {
-    labels.iter().enumerate().map(|(index, label)| if index == choice { format!("[>{label}<]") } else { format!("[{label}]") }).collect::<Vec<_>>().join("  ")
+struct SelectedButtons<'a> { labels: &'a [&'a str], choice: usize }
+impl std::fmt::Display for SelectedButtons<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (index, label) in self.labels.iter().enumerate() {
+            if index > 0 { formatter.write_str(" ")?; }
+            if index == self.choice { write!(formatter, "[>{label}<]")?; }
+            else { formatter.write_str(label)?; }
+        }
+        Ok(())
+    }
+}
+fn selected_buttons<'a>(labels: &'a [&'a str], choice: usize) -> SelectedButtons<'a> {
+    SelectedButtons { labels, choice }
 }
 fn restore_tui_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let restore = execute!(terminal.backend_mut(), Show, DisableMouseCapture, LeaveAlternateScreen).err();
