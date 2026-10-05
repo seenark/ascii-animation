@@ -566,3 +566,131 @@ fn command_focus_visibly_identifies_the_control_that_enter_activates_at_every_su
     assert_eq!(Scene::load_from_path(&path).unwrap(), unsaved);
     assert!(!state.is_dirty());
 }
+
+#[test]
+fn compact_description_scrolling_reads_every_line_with_keyboard_and_wheel() {
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let registry = build_default_registry();
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Char('/'));
+    type_text(&mut state, "fire");
+    key(&mut state, KeyCode::Esc);
+    let mut terminal = Terminal::new(TestBackend::new(36, 10)).unwrap();
+    let mut lines = Vec::new();
+    for _ in 0..registry.get("fire").unwrap().description().chars().count() {
+        terminal.draw(|frame| render_tui(frame, &registry, &mut state)).unwrap();
+        let line = (1..35).map(|column| terminal.backend().buffer()[(column, 5)].symbol()).collect::<String>();
+        let line = line.trim().to_owned();
+        if line.is_empty() { break; }
+        lines.push(line);
+        key(&mut state, KeyCode::PageDown);
+    }
+    assert_eq!(lines.join(" "), registry.get("fire").unwrap().description());
+    for _ in 0..lines.len() { key(&mut state, KeyCode::PageUp); }
+    terminal.draw(|frame| render_tui(frame, &registry, &mut state)).unwrap();
+    handle_tui_event(&mut state, Event::Mouse(MouseEvent { kind: MouseEventKind::ScrollDown, column: 2, row: 5, modifiers: KeyModifiers::NONE }), &registry).unwrap();
+    terminal.draw(|frame| render_tui(frame, &registry, &mut state)).unwrap();
+    let second = (1..35).map(|column| terminal.backend().buffer()[(column, 5)].symbol()).collect::<String>();
+    assert_eq!(second.trim(), lines.get(1).map(String::as_str).unwrap_or(""));
+}
+
+#[test]
+fn help_menu_mouse_cancel_matches_keyboard_activation_but_help_back_preserves_name_draft() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Enter);
+    let work = state.scene.clone();
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Canceled from Help");
+    key(&mut state, KeyCode::F(1));
+    click_label(&mut state, "Esc: Cancel", 80, 24);
+    assert_eq!(state.surface(), Surface::None);
+    assert_eq!(state.scene, work);
+    assert!(!dir.path().join("saved-scenes/Canceled from Help.toml").exists());
+
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Canceled from Help");
+    key(&mut state, KeyCode::F(1));
+    key(&mut state, KeyCode::Down);
+    key(&mut state, KeyCode::Enter);
+    assert_eq!(state.surface(), Surface::None);
+    assert_eq!(state.scene, work);
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Retained in Help");
+    key(&mut state, KeyCode::F(1));
+    click_label(&mut state, "Esc Back", 80, 24);
+    assert_eq!(state.surface(), Surface::Naming);
+    assert_eq!(state.draft_text(), Some("Retained in Help"));
+    assert!(!dir.path().join("saved-scenes").exists());
+}
+
+#[test]
+fn wheel_on_compact_preview_does_not_change_hidden_saved_selection_or_editor_controls() {
+    use ascii_animation::tui::EditorView;
+    use crossterm::event::{MouseEvent, MouseEventKind};
+    let registry = build_default_registry();
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Char('/'));
+    type_text(&mut state, "galaxy");
+    key(&mut state, KeyCode::Enter);
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Alpha");
+    key(&mut state, KeyCode::Enter);
+    let alpha_path = state.config_path().to_path_buf();
+    let alpha = state.scene.clone();
+    state.select_option_by_name("arms").unwrap();
+    key(&mut state, KeyCode::Right);
+    key(&mut state, KeyCode::Char('S'));
+    type_text(&mut state, "Beta");
+    key(&mut state, KeyCode::Enter);
+    for (width, height) in [(60, 18), (36, 10)] {
+        key(&mut state, KeyCode::Char('l'));
+        key(&mut state, KeyCode::Char('w'));
+        screen(&mut state, width, height);
+        handle_tui_event(&mut state, Event::Mouse(MouseEvent { kind: MouseEventKind::ScrollDown, column: 2, row: 4, modifiers: KeyModifiers::NONE }), &registry).unwrap();
+        key(&mut state, KeyCode::Char('w'));
+        key(&mut state, KeyCode::Enter);
+        assert_eq!(state.config_path(), alpha_path);
+        assert_eq!(state.scene, alpha);
+        let selected = state.selected_option_name().unwrap().to_owned();
+        key(&mut state, KeyCode::Esc);
+        screen(&mut state, width, height);
+        handle_tui_event(&mut state, Event::Mouse(MouseEvent { kind: MouseEventKind::ScrollDown, column: 2, row: 4, modifiers: KeyModifiers::NONE }), &registry).unwrap();
+        assert_eq!(state.view(), EditorView::Preview);
+        assert_eq!(state.selected_option_name(), Some(selected.as_str()));
+        assert_eq!(state.scene, alpha);
+        assert!(!state.is_dirty());
+    }
+}
+
+#[test]
+fn saved_preview_pause_is_available_by_visible_mouse_control_and_help_action() {
+    use ascii_animation::tui::TuiEvent;
+    use std::time::Duration;
+    let registry = build_default_registry();
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Enter);
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Paused Preview");
+    key(&mut state, KeyCode::Enter);
+    key(&mut state, KeyCode::Char('l'));
+    handle_tui_event(&mut state, TuiEvent::Advance(Duration::from_millis(50)), &registry).unwrap();
+    click_label(&mut state, "Space Pause/Resume", 36, 10);
+    assert!(state.is_paused());
+    let before = state.preview_text(80, 20);
+    let elapsed = state.elapsed_seconds();
+    handle_tui_event(&mut state, TuiEvent::Advance(Duration::from_millis(50)), &registry).unwrap();
+    assert_eq!(state.elapsed_seconds(), elapsed);
+    assert_eq!(state.preview_text(80, 20), before);
+    key(&mut state, KeyCode::F(1));
+    click_label(&mut state, "Space: Pause/Resume", 80, 24);
+    assert_eq!(state.surface(), Surface::SavedScenes);
+    assert!(!state.is_paused());
+    handle_tui_event(&mut state, TuiEvent::Advance(Duration::from_millis(50)), &registry).unwrap();
+    assert!(state.elapsed_seconds() > elapsed);
+    assert!(!state.is_dirty());
+    assert_eq!(Scene::load_from_path(state.config_path()).unwrap(), state.scene);
+}

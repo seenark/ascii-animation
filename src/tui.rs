@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -57,7 +58,7 @@ enum Transition { New(String), Open(PathBuf, String), Quit }
 enum AfterSave { Stay, Copy, Transition(Transition) }
 struct SaveRequest { path: PathBuf, name: String, overwrite: bool, after: AfterSave }
 #[derive(Clone)]
-enum HitAction { Key(KeyCode), Preset(usize), Saved(usize), Instance(usize), Field(usize), Focus(PaneFocus) }
+enum HitAction { Key(KeyCode), HelpAction(KeyCode), Preset(usize), Saved(usize), Instance(usize), Field(usize), Focus(PaneFocus) }
 struct HitTarget { area: Rect, action: HitAction }
 enum Dialog {
     None,
@@ -638,14 +639,15 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
     if typing && matches!(key.code, KeyCode::Char(_)) { state.focused_action = None; }
     if action_navigation && (matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
         || (state.focused_action.is_some() && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Enter))) {
-        let actions = available_actions(state, false);
-        if !actions.is_empty() {
+        let mut actions = available_actions(state, false);
+        let action_count = actions.clone().count();
+        if action_count > 0 {
             match key.code {
                 KeyCode::Tab | KeyCode::BackTab => {
                     let next = match (state.focused_action, key.code) {
                         (None, KeyCode::Tab) => Some(0),
-                        (None, _) => Some(actions.len() - 1),
-                        (Some(index), KeyCode::Tab) if index + 1 < actions.len() => Some(index + 1),
+                        (None, _) => Some(action_count - 1),
+                        (Some(index), KeyCode::Tab) if index + 1 < action_count => Some(index + 1),
                         (Some(index), KeyCode::BackTab) if index > 0 => Some(index - 1),
                         _ => None,
                     };
@@ -653,15 +655,15 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                     return Ok(TuiAction::Continue);
                 }
                 KeyCode::Left | KeyCode::Up if state.focused_action.is_some() => {
-                    state.focused_action = Some((state.focused_action.unwrap() + actions.len() - 1) % actions.len());
+                    state.focused_action = Some((state.focused_action.unwrap() + action_count - 1) % action_count);
                     return Ok(TuiAction::Continue);
                 }
                 KeyCode::Right | KeyCode::Down if state.focused_action.is_some() => {
-                    state.focused_action = Some((state.focused_action.unwrap() + 1) % actions.len());
+                    state.focused_action = Some((state.focused_action.unwrap() + 1) % action_count);
                     return Ok(TuiAction::Continue);
                 }
                 KeyCode::Enter if state.focused_action.is_some() => {
-                    let code = actions[state.focused_action.take().unwrap()].1;
+                    let code = actions.nth(state.focused_action.take().unwrap()).expect("Focused action exists").1;
                     return handle_key(state, KeyEvent::new(code, KeyModifiers::NONE), registry);
                 }
                 _ => {},
@@ -726,8 +728,8 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                     }
                     KeyCode::Down if !browser.names.is_empty() => { browser.selected = (browser.selected + 1) % browser.names.len(); browser.description_scroll = 0; }
                     KeyCode::Up if !browser.names.is_empty() => { browser.selected = (browser.selected + browser.names.len() - 1) % browser.names.len(); browser.description_scroll = 0; }
-                    KeyCode::PageDown => browser.description_scroll = browser.description_scroll.saturating_add(3),
-                    KeyCode::PageUp => browser.description_scroll = browser.description_scroll.saturating_sub(3),
+                    KeyCode::PageDown => browser.description_scroll = browser.description_scroll.saturating_add(1),
+                    KeyCode::PageUp => browser.description_scroll = browser.description_scroll.saturating_sub(1),
                     _ if browser.typing => { if edit_text(&mut browser.search, &mut browser.cursor, key, None) { browser.selected = 0; browser.description_scroll = 0; } }
                     _ => {},
                 }
@@ -864,19 +866,21 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
             state.dialog = Dialog::Export { scroll, choice, command };
         }
         Dialog::Help(mut scroll) => {
-            let actions = available_actions(state, true);
+            let mut actions = available_actions(state, true);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('?') => state.close(),
                 KeyCode::Down | KeyCode::Tab => { scroll = scroll.saturating_add(1); state.dialog = Dialog::Help(scroll); },
                 KeyCode::Up | KeyCode::BackTab => { scroll = scroll.saturating_sub(1); state.dialog = Dialog::Help(scroll); },
                 KeyCode::PageDown => { scroll = scroll.saturating_add(5); state.dialog = Dialog::Help(scroll); },
                 KeyCode::PageUp => { scroll = scroll.saturating_sub(5); state.dialog = Dialog::Help(scroll); },
-                KeyCode::Enter if (scroll as usize) < actions.len() => {
-                    let code = actions[scroll as usize].1;
-                    state.close();
-                    return handle_key(state, KeyEvent::new(code, KeyModifiers::NONE), registry);
+                KeyCode::Enter => {
+                    if let Some((_, code)) = actions.nth(scroll as usize) {
+                        state.close();
+                        return handle_key(state, KeyEvent::new(*code, KeyModifiers::NONE), registry);
+                    }
+                    state.dialog = Dialog::Help(scroll);
                 }
-                KeyCode::Char(ch) if actions.iter().any(|(_, code)| *code == KeyCode::Char(ch)) => {
+                KeyCode::Char(ch) if actions.any(|(_, code)| *code == KeyCode::Char(ch)) => {
                     state.close(); return handle_key(state, key, registry);
                 }
                 _ => state.dialog = Dialog::Help(scroll),
@@ -971,8 +975,11 @@ fn handle_mouse(state: &mut TuiState, mouse: MouseEvent, registry: &PresetRegist
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => match target {
             Some(HitAction::Key(code)) => {
-                if matches!(state.dialog, Dialog::Help(_)) && code != KeyCode::Esc && code != KeyCode::F(1) { state.close(); }
                 if code != KeyCode::F(1) && code != KeyCode::Esc { state.focused_action = None; }
+                return handle_key(state, KeyEvent::new(code, KeyModifiers::NONE), registry);
+            }
+            Some(HitAction::HelpAction(code)) => {
+                state.close();
                 return handle_key(state, KeyEvent::new(code, KeyModifiers::NONE), registry);
             }
             Some(HitAction::Preset(index)) => {
@@ -1000,6 +1007,15 @@ fn handle_mouse(state: &mut TuiState, mouse: MouseEvent, registry: &PresetRegist
             if matches!(state.dialog, Dialog::Browser(_) | Dialog::Saved(_) | Dialog::None)
                 && !contains(layout.options, mouse.column, mouse.row) { return Ok(TuiAction::Continue); }
             if state.fullscreen && matches!(state.dialog, Dialog::None) { return Ok(TuiAction::Continue); }
+            if editor_layout(state.terminal_size.0, state.terminal_size.1) == EditorLayout::Small {
+                let options_visible = match &state.dialog {
+                    Dialog::Browser(browser) => !browser.previewing,
+                    Dialog::Saved(browser) => !browser.previewing,
+                    Dialog::None => state.focus == PaneFocus::Scene || state.view == EditorView::Edit,
+                    _ => true,
+                };
+                if !options_visible { return Ok(TuiAction::Continue); }
+            }
             let down = mouse.kind == MouseEventKind::ScrollDown;
             let code = match &state.dialog {
                 Dialog::Editor(_) | Dialog::Name { .. } | Dialog::Overwrite(_) | Dialog::Guard { .. } | Dialog::ConfirmDelete | Dialog::ConfirmReplace(_) => return Ok(TuiAction::Continue),
@@ -1031,34 +1047,45 @@ fn key_label(code: KeyCode) -> String {
     match code { KeyCode::Char(' ') => "Space".into(), KeyCode::Char(ch) => ch.to_string(), KeyCode::Enter => "Enter".into(), KeyCode::Esc => "Esc".into(),
         KeyCode::Left => "Left".into(), KeyCode::Right => "Right".into(), KeyCode::Tab => "Tab".into(), KeyCode::F(1) => "F1".into(), other => format!("{other:?}") }
 }
-fn available_actions(state: &TuiState, underlay: bool) -> Vec<(&'static str, KeyCode)> {
+fn available_actions(state: &TuiState, underlay: bool) -> impl Iterator<Item = &'static (&'static str, KeyCode)> + Clone + 'static {
     let dialog = if underlay { state.underlays.last().map(|underlay| &underlay.dialog).unwrap_or(&state.dialog) } else { &state.dialog };
-    let pairs: Vec<(&str, KeyCode)> = match dialog {
-        Dialog::Browser(browser) if browser.typing => vec![("Edit", KeyCode::Enter), ("Stop typing", KeyCode::Tab), ("Cancel", KeyCode::Esc)],
-        Dialog::Browser(_) => vec![("Edit", KeyCode::Enter), ("Saved Scenes", KeyCode::Char('l')), ("Search", KeyCode::Char('/')), ("Back", KeyCode::Esc), ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')),
-            ("Preview/List", KeyCode::Char('w')), ("Type search", KeyCode::Tab)],
-        Dialog::Saved(browser) if browser.needs_save => vec![("Open/Edit to Save", KeyCode::Enter), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))],
-        Dialog::Saved(_) => vec![("Open/Edit", KeyCode::Enter), ("Play", KeyCode::Char('p')), ("Copy Command", KeyCode::Char('c')), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Error details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))],
-        Dialog::Name { .. } => vec![("Save", KeyCode::Enter), ("Cancel", KeyCode::Esc)],
-        Dialog::Overwrite(_) => vec![("Overwrite", KeyCode::Enter), ("Cancel", KeyCode::Esc)],
-        Dialog::SaveError { .. } => vec![("Retry", KeyCode::Char('r')), ("Cancel", KeyCode::Esc)],
-        Dialog::ReadError { .. } => vec![("Retry", KeyCode::Char('r')), ("Back", KeyCode::Esc)],
-        Dialog::Guard { .. } => vec![("Save", KeyCode::Char('s')), ("Discard", KeyCode::Char('d')), ("Cancel", KeyCode::Esc)],
-        Dialog::Editor(_) => vec![("Commit", KeyCode::Enter), ("Cancel", KeyCode::Esc), ("Previous", KeyCode::Left), ("Next", KeyCode::Right)],
-        Dialog::ConfirmDelete | Dialog::ConfirmReplace(_) => vec![("Confirm", KeyCode::Enter), ("Cancel", KeyCode::Esc)],
-        Dialog::Export { command, .. } => vec![(if command.is_none() && state.is_dirty() { "Save and Copy" } else { "Copy" }, KeyCode::Char('c')), ("Back", KeyCode::Esc)],
-        Dialog::Recovery(_) => vec![("Reload", KeyCode::Char('r')), ("Unsaved defaults", KeyCode::Char('d')), ("Quit", KeyCode::Char('q'))],
-        Dialog::Help(_) => vec![("Back", KeyCode::Esc)],
-        Dialog::None if state.fullscreen => vec![(if state.is_paused() { "Resume" } else { "Pause" }, KeyCode::Char(' ')), ("Back", KeyCode::Esc), ("Quit", KeyCode::Char('q'))],
-        Dialog::None => {
-            let mut actions = vec![("Save", KeyCode::Char('s')), ("Save As", KeyCode::Char('S')), (if state.is_dirty() { "Save and Copy" } else { "Copy Command" }, KeyCode::Char('c')), ("New", KeyCode::Char('n')), ("Saved Scenes", KeyCode::Char('l')), ("Animations", KeyCode::Char('v')),
-                ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')), ("Focus pane", KeyCode::Tab)];
-            if state.focus == PaneFocus::Inspector { actions.extend([("Decrease", KeyCode::Left), ("Increase", KeyCode::Right), ("Edit value", KeyCode::Enter)]); }
-            if state.focus == PaneFocus::Scene { actions.extend([("Add", KeyCode::Char('a')), ("Replace", KeyCode::Char('r')), ("Delete", KeyCode::Char('d')), ("Move up", KeyCode::Char('[')), ("Move down", KeyCode::Char(']')), ("Edit instance", KeyCode::Enter)]); }
-            actions
-        }
+    let empty: &'static [(&'static str, KeyCode)] = &[];
+    let (first, second, third): (&'static [(&'static str, KeyCode)], &'static [(&'static str, KeyCode)], &'static [(&'static str, KeyCode)]) = match dialog {
+        Dialog::Browser(browser) if browser.typing => (&[("Edit", KeyCode::Enter), ("Stop typing", KeyCode::Tab), ("Cancel", KeyCode::Esc)], empty, empty),
+        Dialog::Browser(_) => (&[("Edit", KeyCode::Enter), ("Saved Scenes", KeyCode::Char('l')), ("Search", KeyCode::Char('/')), ("Back", KeyCode::Esc), ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')),
+            ("Preview/List", KeyCode::Char('w')), ("Type search", KeyCode::Tab)], empty, empty),
+        Dialog::Saved(browser) if browser.needs_save => (&[("Open/Edit to Save", KeyCode::Enter), ("Pause/Resume", KeyCode::Char(' ')), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))], empty, empty),
+        Dialog::Saved(_) => (&[("Open/Edit", KeyCode::Enter), ("Play", KeyCode::Char('p')), ("Pause/Resume", KeyCode::Char(' ')), ("Copy Command", KeyCode::Char('c')), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Error details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))], empty, empty),
+        Dialog::Name { .. } => (&[("Save", KeyCode::Enter), ("Cancel", KeyCode::Esc)], empty, empty),
+        Dialog::Overwrite(_) => (&[("Overwrite", KeyCode::Enter), ("Cancel", KeyCode::Esc)], empty, empty),
+        Dialog::SaveError { .. } => (&[("Retry", KeyCode::Char('r')), ("Cancel", KeyCode::Esc)], empty, empty),
+        Dialog::ReadError { .. } => (&[("Retry", KeyCode::Char('r')), ("Back", KeyCode::Esc)], empty, empty),
+        Dialog::Guard { .. } => (&[("Save", KeyCode::Char('s')), ("Discard", KeyCode::Char('d')), ("Cancel", KeyCode::Esc)], empty, empty),
+        Dialog::Editor(_) => (&[("Commit", KeyCode::Enter), ("Cancel", KeyCode::Esc), ("Previous", KeyCode::Left), ("Next", KeyCode::Right)], empty, empty),
+        Dialog::ConfirmDelete | Dialog::ConfirmReplace(_) => (&[("Confirm", KeyCode::Enter), ("Cancel", KeyCode::Esc)], empty, empty),
+        Dialog::Export { command, .. } => (if command.is_none() && state.is_dirty() {
+            &[("Save and Copy", KeyCode::Char('c')), ("Back", KeyCode::Esc)]
+        } else { &[("Copy", KeyCode::Char('c')), ("Back", KeyCode::Esc)] }, empty, empty),
+        Dialog::Recovery(_) => (&[("Reload", KeyCode::Char('r')), ("Unsaved defaults", KeyCode::Char('d')), ("Quit", KeyCode::Char('q'))], empty, empty),
+        Dialog::Help(_) => (&[("Back", KeyCode::Esc)], empty, empty),
+        Dialog::None if state.fullscreen => (if state.is_paused() {
+            &[("Resume", KeyCode::Char(' ')), ("Back", KeyCode::Esc), ("Quit", KeyCode::Char('q'))]
+        } else { &[("Pause", KeyCode::Char(' ')), ("Back", KeyCode::Esc), ("Quit", KeyCode::Char('q'))] }, empty, empty),
+        Dialog::None => (
+            &[("Save", KeyCode::Char('s')), ("Save As", KeyCode::Char('S'))],
+            if state.is_dirty() { &[("Save and Copy", KeyCode::Char('c'))] } else { &[("Copy Command", KeyCode::Char('c'))] },
+            &[("New", KeyCode::Char('n')), ("Saved Scenes", KeyCode::Char('l')), ("Animations", KeyCode::Char('v')),
+                ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')), ("Focus pane", KeyCode::Tab)],
+        ),
     };
-    pairs
+    let context: &'static [(&'static str, KeyCode)] = if matches!(dialog, Dialog::None) && !state.fullscreen {
+        match state.focus {
+            PaneFocus::Inspector => &[("Decrease", KeyCode::Left), ("Increase", KeyCode::Right), ("Edit value", KeyCode::Enter)],
+            PaneFocus::Scene => &[("Add", KeyCode::Char('a')), ("Replace", KeyCode::Char('r')), ("Delete", KeyCode::Char('d')), ("Move up", KeyCode::Char('[')), ("Move down", KeyCode::Char(']')), ("Edit instance", KeyCode::Enter)],
+            PaneFocus::Preview => empty,
+        }
+    } else { empty };
+    [first, second, third, context].into_iter().flat_map(|slice| slice.iter())
 }
 fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let actions = available_actions(state, false);
@@ -1072,15 +1099,15 @@ fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let mut x = area.x; let mut y = area.y + 1;
     let focused = match &state.dialog { Dialog::Export { choice, .. } => Some(*choice), _ => state.focused_action };
     let start = focused.map(|index| index.saturating_sub(1)).unwrap_or(0);
-    for (index, (label, key)) in actions.into_iter().enumerate().skip(start) {
-        let text = format!("[{}{} {}]", if focused == Some(index) { ">" } else { "" }, key_label(key), label);
+    for (index, (label, key)) in actions.enumerate().skip(start) {
+        let text = format!("[{}{} {}]", if focused == Some(index) { ">" } else { "" }, key_label(*key), label);
         let width = text.len() as u16;
         if width > area.width { continue; }
         if x + width > area.right() { x = area.x; y += 1; }
         if y >= area.bottom() { break; }
         let target = Rect::new(x, y, width, 1);
         frame.render_widget(Paragraph::new(text).style(Style::default().fg(MUTED)), target);
-        state.hit_targets.push(HitTarget { area: target, action: HitAction::Key(key) });
+        state.hit_targets.push(HitTarget { area: target, action: HitAction::Key(*key) });
         x += width + 1;
     }
     if y == area.y + 1 { frame.render_widget(Paragraph::new(guidance), Rect::new(area.x, area.y + 2, area.width, 1)); }
@@ -1396,12 +1423,23 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
         Dialog::ConfirmDelete => ("Delete animation instance?".into(), format!("Remove {} and all configured options?\nEnter/y deletes; Esc/n cancels.", state.selected_instance().id), 0),
         Dialog::ConfirmReplace(name) => ("Replace configured Preset?".into(), format!("Replace {} with {name}? Old Preset options are lost.\nPlacement, Layer and Z-index remain.\nEnter/y confirms; Esc/n cancels.", state.selected_instance().id), 0),
         Dialog::Guard { choice, transition } => ("Unsaved Scene".into(), format!("Save before {}?\n{}\nSave / Discard / Cancel. Escape returns without changing work.", match transition { Transition::Quit => "quitting", Transition::New(_) => "starting a new Scene", Transition::Open(..) => "opening another Scene" }, selected_buttons(&["Save", "Discard", "Cancel"], *choice)), 0),
-        Dialog::Export { scroll, command, .. } => ("Copy playback command".into(), format!("{}\n\nUses a local Scene file on this machine. Later Save updates the same target; another Scene has its own file.\n{}\n{}\nUp/Down/PgUp/PgDn scroll; Esc returns.",
-            command.clone().unwrap_or_else(|| if state.is_dirty() { "Save and Copy creates a saved target before copying.".into() } else { state.export_command() }),
-            state.copy_status.as_deref().unwrap_or(""), state.status.as_deref().unwrap_or("")), *scroll),
+        Dialog::Export { scroll, command, .. } => {
+            let generated;
+            let text = match command.as_deref() {
+                Some(command) => command,
+                None if state.is_dirty() => "Save and Copy creates a saved target before copying.",
+                None => { generated = state.export_command(); &generated },
+            };
+            ("Copy playback command".into(), format!("{text}\n\nUses a local Scene file on this machine. Later Save updates the same target; another Scene has its own file.\n{}\n{}\nUp/Down/PgUp/PgDn scroll; Esc returns.",
+                state.copy_status.as_deref().unwrap_or(""), state.status.as_deref().unwrap_or("")), *scroll)
+        }
         Dialog::Help(scroll) => {
             let actions = help_actions.as_ref().expect("Help actions");
-            let mut text = actions.iter().enumerate().map(|(index, (label, code))| format!("{} {}: {label}", if index == *scroll as usize { ">" } else { " " }, key_label(*code))).collect::<Vec<_>>().join("\n");
+            let mut text = String::new();
+            for (index, (label, code)) in actions.clone().enumerate() {
+                if index > 0 { text.push('\n'); }
+                let _ = write!(text, "{} {}: {label}", if index == *scroll as usize { ">" } else { " " }, key_label(*code));
+            }
             let context = state.underlays.last().map(|underlay| &underlay.dialog).unwrap_or(&state.dialog);
             let details = match context {
                 Dialog::Name { text, error, .. } => format!("Name draft: {text}\n{}\nUse 1–80 ASCII letters, digits, spaces, - or _. Paths and shell syntax are not allowed.", error.as_deref().unwrap_or("Enter saves; Escape cancels without writing.")),
@@ -1433,8 +1471,8 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
     if matches!(state.dialog, Dialog::Help(_)) {
         let inner = panel(String::new(), true).inner(modal);
         let actions = help_actions.as_ref().expect("Help actions");
-        for (row, (_, code)) in actions.iter().skip(scroll as usize).take(inner.height as usize).enumerate() {
-            state.hit_targets.push(HitTarget { area: Rect::new(inner.x, inner.y + row as u16, inner.width, 1), action: HitAction::Key(*code) });
+        for (row, (_, code)) in actions.clone().skip(scroll as usize).take(inner.height as usize).enumerate() {
+            state.hit_targets.push(HitTarget { area: Rect::new(inner.x, inner.y + row as u16, inner.width, 1), action: HitAction::HelpAction(*code) });
         }
     }
 }
