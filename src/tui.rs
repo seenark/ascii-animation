@@ -254,7 +254,7 @@ impl TuiState {
         self.terminal_size = (width, height);
     }
     fn active_preview(&self) -> &SceneSession {
-        self.temporary.as_ref().or_else(|| self.underlays.last().and_then(|underlay| underlay.preview.as_ref())).unwrap_or(&self.session)
+        self.temporary.as_ref().or_else(|| self.underlays.iter().rev().find_map(|underlay| underlay.preview.as_ref())).unwrap_or(&self.session)
     }
     pub fn advance(&mut self, delta: Duration) {
         self.session.advance(delta);
@@ -284,7 +284,7 @@ impl TuiState {
                 if matches!(&self.dialog, Dialog::Browser(browser) if browser.names.is_empty()) {
                     return visible.then(|| Text::from("No matching Preset. Edit search or Escape to return."));
                 }
-                let temporary = self.temporary.as_mut().or_else(|| self.underlays.last_mut().and_then(|underlay| underlay.preview.as_mut()));
+                let temporary = self.temporary.as_mut().or_else(|| self.underlays.iter_mut().rev().find_map(|underlay| underlay.preview.as_mut()));
                 if let Some(temporary) = temporary {
                     let color = temporary.scene().color;
                     match temporary.draw(width, height) {
@@ -1388,7 +1388,7 @@ fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let mut group = None; let mut selected_row = 0; let mut row = 0;
     if state.focus == PaneFocus::Inspector || state.fields.get(state.selected_option).is_some_and(|field| field.group != OptionGroup::Layout) {
         for (index, field) in state.fields.iter().enumerate() {
-            if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
+            if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { break; }
             if group != Some(group_index(field.group)) { row += 1; group = Some(group_index(field.group)); }
             if index == state.selected_option { selected_row = row; break; }
             row += 1;
@@ -1408,13 +1408,14 @@ fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let mut guidance_drawn = false;
     group = None; row = 0;
     for (index, field) in state.fields.iter().enumerate() {
-        if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
+        if row >= end || field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { break; }
         if group != Some(group_index(field.group)) {
             if let Some(target) = target_for(row) {
                 frame.render_widget(Line::styled(group_label(field.group), Style::default().fg(MUTED)), target);
             }
             row += 1; group = Some(group_index(field.group));
         }
+        if row >= end { break; }
         if let Some(target) = target_for(row) {
             text.clear();
             let _ = write!(text, "{} {}: ", if index == state.selected_option { ">" } else { " " }, field.label);
@@ -1424,7 +1425,8 @@ fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
             frame.render_widget(Line::styled(text.as_str(), Style::default().fg(if index == state.selected_option { AMBER } else { PAPER })), target);
             state.hit_targets.push(HitTarget { area: target, action: HitAction::Field(index) });
             if index == state.selected_option {
-                text.truncate(value_end); text.push('\n'); text.push_str(&field.help);
+                text.truncate(value_end);
+                if help_height > 1 { text.push('\n'); text.push_str(&field.help); }
                 frame.render_widget(Paragraph::new(&text[2..]).style(Style::default().fg(MUTED)).wrap(Wrap { trim: false }), help_area);
                 guidance_drawn = true;
             }
@@ -1435,7 +1437,7 @@ fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
         if let Some(field) = state.fields.get(state.selected_option) {
             text.clear(); let _ = write!(text, "{}: ", field.label);
             if let Some(value) = state.field_label(&field.name) { let _ = write!(text, "{value}"); }
-            text.push('\n'); text.push_str(&field.help);
+            if help_height > 1 { text.push('\n'); text.push_str(&field.help); }
             frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(MUTED)).wrap(Wrap { trim: false }), help_area);
         }
     }

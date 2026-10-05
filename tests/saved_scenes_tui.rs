@@ -785,3 +785,59 @@ fn compact_hidden_preset_and_saved_previews_keep_stateful_history_when_shown_aga
         assert_eq!(std::fs::read(&saved_path).unwrap(), saved_bytes);
     }
 }
+
+#[test]
+fn nested_saved_command_help_retains_selected_frame_and_extended_viewport_without_changing_live_work() {
+    use ascii_animation::presets::OptionKind;
+    use ascii_animation::scene::{AnimationInstance, Layer, Placement};
+    use ascii_animation::tui::TuiEvent;
+    use std::time::Duration;
+    fn preview_top(state: &mut TuiState) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(120, 38)).unwrap();
+        terminal.draw(|frame| render_tui(frame, &build_default_registry(), state)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (1..9).flat_map(|row| (37..119).map(move |column| buffer[(column, row)].symbol())).collect()
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let registry = build_default_registry();
+    let descriptor = registry.get("text-art").unwrap();
+    let mut options = descriptor.defaults();
+    let overflow = descriptor.visible_options(&options).into_iter().find(|field| {
+        matches!(field.kind(), OptionKind::Choice { choices } if choices.iter().any(|choice| choice == "extend"))
+    }).unwrap().name().to_owned();
+    options.insert(overflow, OptionValue::Choice("extend".into()));
+    options.insert("text".into(), OptionValue::Text("A".repeat(30)));
+    options.insert("text-font".into(), OptionValue::Choice("Standard".into()));
+    options.insert("text-effect".into(), OptionValue::Choice("none".into()));
+    let selected = Scene { frame_rate: 30, color: false, instances: vec![AnimationInstance {
+        id: "wide-selected".into(), preset: "text-art".into(), options, placement: Placement::Top, layer: Layer::Normal, z_index: 0, enabled: true,
+    }] };
+    std::fs::create_dir(dir.path().join("saved-scenes")).unwrap();
+    let path = dir.path().join("saved-scenes/Wide Selected.toml");
+    selected.save_to_path(&path).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Char('/'));
+    type_text(&mut state, "galaxy");
+    key(&mut state, KeyCode::Enter);
+    let live = state.scene.clone();
+    key(&mut state, KeyCode::Char(' '));
+    let live_frame = preview_top(&mut state);
+    key(&mut state, KeyCode::Char('l'));
+    key(&mut state, KeyCode::Char('c'));
+    let selected_frame = preview_top(&mut state);
+    assert_ne!(selected_frame, live_frame);
+    key(&mut state, KeyCode::F(1));
+    handle_tui_event(&mut state, TuiEvent::Advance(Duration::from_millis(50)), &registry).unwrap();
+    assert_eq!(preview_top(&mut state), selected_frame);
+    assert!(state.is_paused());
+    key(&mut state, KeyCode::Esc);
+    assert_eq!(state.surface(), Surface::Export);
+    assert_eq!(preview_top(&mut state), selected_frame);
+    key(&mut state, KeyCode::Esc);
+    assert_eq!(state.surface(), Surface::SavedScenes);
+    assert_eq!(preview_top(&mut state), selected_frame);
+    assert_eq!(state.scene, live);
+    assert!(state.is_dirty());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
