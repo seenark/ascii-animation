@@ -1045,9 +1045,12 @@ fn validate_scene_name(text: &str) -> std::result::Result<String, String> {
         Err("Use 1–80 ASCII letters, digits, spaces, - or _. Paths, dots and shell syntax are not allowed.".into())
     } else { Ok(name.into()) }
 }
-fn key_label(code: KeyCode) -> String {
-    match code { KeyCode::Char(' ') => "Space".into(), KeyCode::Char(ch) => ch.to_string(), KeyCode::Enter => "Enter".into(), KeyCode::Esc => "Esc".into(),
-        KeyCode::Left => "Left".into(), KeyCode::Right => "Right".into(), KeyCode::Tab => "Tab".into(), KeyCode::F(1) => "F1".into(), other => format!("{other:?}") }
+struct KeyLabel(KeyCode);
+impl std::fmt::Display for KeyLabel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 == KeyCode::Enter { formatter.write_str("Enter") }
+        else { std::fmt::Display::fmt(&self.0, formatter) }
+    }
 }
 fn available_actions(state: &TuiState, underlay: bool) -> impl Iterator<Item = &'static (&'static str, KeyCode)> + Clone + 'static {
     let dialog = if underlay { state.underlays.last().map(|underlay| &underlay.dialog).unwrap_or(&state.dialog) } else { &state.dialog };
@@ -1094,7 +1097,7 @@ fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let typing = matches!(&state.dialog, Dialog::Name { .. } | Dialog::Editor(Draft { value: OptionValue::Text(_), .. }))
         || matches!(&state.dialog, Dialog::Browser(browser) if browser.typing);
     let help = if matches!(state.dialog, Dialog::Help(_)) { ("Back", KeyCode::Esc) } else { ("Help/Actions", KeyCode::F(1)) };
-    let help_text = format!("[{} {}]", key_label(help.1), help.0);
+    let help_text = format!("[{} {}]", KeyLabel(help.1), help.0);
     frame.render_widget(Paragraph::new(help_text.as_str()).style(Style::default().fg(AMBER)), Rect::new(area.x, area.y, area.width, 1));
     state.hit_targets.push(HitTarget { area: Rect::new(area.x, area.y, help_text.len().min(area.width as usize) as u16, 1), action: HitAction::Key(help.1) });
     let guidance = if typing { "Typing text; Esc cancels. F1 Help." } else if matches!(state.dialog, Dialog::None) && state.focus == PaneFocus::Inspector { "Up/Down select; arrows adjust; Shift fast" } else { state.copy_status.as_deref().or(state.status.as_deref()).unwrap_or("Tab focus; Up/Down select; Enter act") };
@@ -1102,7 +1105,7 @@ fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let focused = match &state.dialog { Dialog::Export { choice, .. } => Some(*choice), _ => state.focused_action };
     let start = focused.map(|index| index.saturating_sub(1)).unwrap_or(0);
     for (index, (label, key)) in actions.enumerate().skip(start) {
-        let text = format!("[{}{} {}]", if focused == Some(index) { ">" } else { "" }, key_label(*key), label);
+        let text = format!("[{}{} {}]", if focused == Some(index) { ">" } else { "" }, KeyLabel(*key), label);
         let width = text.len() as u16;
         if width > area.width { continue; }
         if x + width > area.right() { x = area.x; y += 1; }
@@ -1386,7 +1389,7 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
                 frame.render_widget(Paragraph::new(format!("{} {}", if index == browser.selected { ">" } else { " " }, registry.get(name).expect("registered Preset").label())).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
                 state.hit_targets.push(HitTarget { area: target, action: HitAction::Preset(index) });
             }
-            let description = browser.names.get(browser.selected).map(|name| registry.get(name).expect("registered Preset").description().to_string()).unwrap_or_else(|| "No matches. / searches; Esc returns.".into());
+            let description = browser.names.get(browser.selected).map(|name| registry.get(name).expect("registered Preset").description()).unwrap_or("No matches. / searches; Esc returns.");
             frame.render_widget(Paragraph::new(description).wrap(Wrap { trim: false }).scroll((browser.description_scroll, 0)), Rect::new(inner.x, inner.y + 1 + rows as u16, inner.width, details));
         }
         Dialog::Saved(browser) => {
@@ -1440,28 +1443,38 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
             let mut text = String::new();
             for (index, (label, code)) in actions.clone().enumerate() {
                 if index > 0 { text.push('\n'); }
-                let _ = write!(text, "{} {}: {label}", if index == *scroll as usize { ">" } else { " " }, key_label(*code));
+                let _ = write!(text, "{} {}: {label}", if index == *scroll as usize { ">" } else { " " }, KeyLabel(*code));
             }
             let context = state.underlays.last().map(|underlay| &underlay.dialog).unwrap_or(&state.dialog);
-            let details = match context {
-                Dialog::Name { text, error, .. } => format!("Name draft: {text}\n{}\nUse 1–80 ASCII letters, digits, spaces, - or _. Paths and shell syntax are not allowed.", error.as_deref().unwrap_or("Enter saves; Escape cancels without writing.")),
+            match context {
+                Dialog::Name { text: draft_name, error, .. } => {
+                    let _ = write!(text, "\n\nName draft: {draft_name}\n{}\nUse 1–80 ASCII letters, digits, spaces, - or _. Paths and shell syntax are not allowed.", error.as_deref().unwrap_or("Enter saves; Escape cancels without writing."));
+                }
                 Dialog::Editor(draft) => {
                     let field = state.fields.iter().find(|field| field.name == draft.name).expect("draft field");
-                    format!("{}: {}\n{}\n{}", field.label, format_tui_option_value(&draft.value), field.help, draft.error.as_deref().unwrap_or("Draft only. Enter commits; Escape cancels."))
+                    let _ = write!(text, "\n\n{}: {}\n{}\n{}", field.label, format_tui_option_value(&draft.value), field.help, draft.error.as_deref().unwrap_or("Draft only. Enter commits; Escape cancels."));
                 }
-                Dialog::SaveError { request, error, .. } => format!("{}\n{error}", request.path.display()),
-                Dialog::ReadError { error, .. } => error.clone(),
+                Dialog::SaveError { request, error, .. } => {
+                    let _ = write!(text, "\n\n{}\n{error}", request.path.display());
+                }
+                Dialog::ReadError { error, .. } => {
+                    if !error.is_empty() { text.push_str("\n\n"); text.push_str(error); }
+                }
                 Dialog::Saved(browser) => match (&browser.directory_error, &browser.error) {
-                    (Some(directory), Some(entry)) => format!("{directory}\n\n{entry}"),
-                    (Some(error), None) | (None, Some(error)) => error.clone(),
-                    (None, None) => "Saved Scenes preserve complete configuration. Open/Edit replaces work only after the unsaved-work guard.".into(),
+                    (Some(directory), Some(entry)) => { let _ = write!(text, "\n\n{directory}\n\n{entry}"); }
+                    (Some(error), None) | (None, Some(error)) => {
+                        if !error.is_empty() { text.push_str("\n\n"); text.push_str(error); }
+                    }
+                    (None, None) => text.push_str("\n\nSaved Scenes preserve complete configuration. Open/Edit replaces work only after the unsaved-work guard."),
                 },
                 Dialog::None if state.focus == PaneFocus::Inspector => {
-                    state.fields.get(state.selected_option).map(|field| format!("{}: {}\n{}\nLeft/Right adjusts; Shift adjusts numeric values faster. Enter edits text and choices.", field.label, state.field_value(&field.name).map(|value| format_tui_option_value(&value)).unwrap_or_default(), field.help)).unwrap_or_default()
+                    if let Some(field) = state.fields.get(state.selected_option) {
+                        let value = state.field_value(&field.name).map(|value| format_tui_option_value(&value)).unwrap_or_default();
+                        let _ = write!(text, "\n\n{}: {}\n{}\nLeft/Right adjusts; Shift adjusts numeric values faster. Enter edits text and choices.", field.label, value, field.help);
+                    }
                 }
-                _ => String::new(),
-            };
-            if !details.is_empty() { text.push_str("\n\n"); text.push_str(&details); }
+                _ => {},
+            }
             text.push_str("\n\nTab / Shift+Tab changes focus. Up/Down selects visible fields or entries. Left/Right adjusts; Shift adjusts faster. Enter edits text/choices; Esc cancels drafts. Search/name/text own printable keys. F1 opens Help without entering text.\nAnimations: a adds, r replaces, d deletes, [/] reorders. Placement, Layer and Z-index are distinct controls.\nPreview and direct playback share the Viewport. Saved Scenes preserve all instances and playback settings, not runtime history.\nUp/Down/PgUp/PgDn scroll. Esc returns.");
             ("Help / Actions".into(), text, *scroll)
         }
