@@ -30,7 +30,7 @@ The app has two entrypoints:
 - `ascii-animation run` — run one preset directly or load a saved scene config
 - `ascii-animation tui` — open the interactive editor with live preview
 
-Saved scenes live at `~/.config/ascii-animation/scene.toml`.
+Named Saved Scenes live at `~/.config/ascii-animation/saved-scenes/<name>.toml`. The existing `~/.config/ascii-animation/scene.toml` remains a separate default configuration and is available in the Saved Scenes library.
 
 CLI playback and editor preview use the same persistent Scene session. Pausing freezes its clock; resizing only the viewport does not restart animations. State-changing edits restart only affected instances and are marked in the inspector. Seeds remain stable during a live session, including reordering and duplicate display identifiers. Export starts a fresh session from committed settings, not from the current preview frame.
 
@@ -120,32 +120,41 @@ ascii-animation run galaxy --seed 17
 ascii-animation tui
 ```
 
-The editor opens directly into a live preview. Wide terminals show the Scene list and inspector beside it. At 80–109 columns and at least 24 rows, the preview sits above the editor. Smaller terminals use full-width Preview, Scene, and Edit views; Tab switches focus and the active view. The inspector scrolls to keep its selected field visible.
-Field help shows exact CLI flags, including options in the Layout group; Scene-only controls are labeled separately. A cropped-Canvas warning remains visible in fullscreen preview without resizing the animation or its FIGlet glyphs.
+The TUI starts with searchable Preset selection and a live preview. Select a Preset and press Enter to edit its descriptor defaults, or press `l` to browse Saved Scenes. Browsing does not save or replace the current editing Scene.
+
+The editor groups options beside the preview and shows the current name, saved/unsaved state, and playback state. Wide terminals show both panes. Medium terminals stack them; compact terminals show one work pane at a time. Selection stays visible at 120x38, 80x24, 60x18, and 36x10. Below 36x10, resize guidance replaces editing while retaining work and drafts.
 
 Core controls:
 
-- `Tab` / `Shift+Tab` — move focus between Preview, Scene, and Edit
-- `Up` / `Down` — select an instance or inspector field
+- `Tab` / `Shift+Tab` — move pane, search, or dialog focus
+- `Up` / `Down` — select entries or fields; scroll Help, commands, and errors
 - `Left` / `Right` — adjust a value; hold Shift for faster numeric changes
-- `Enter` — edit text or choices, or commit an edit
-- `Escape` — cancel the current edit, browser, or panel; it does not quit
-- `a` — open the searchable preset browser; Enter adds and selects its highlighted preset
-- Scene focus: `d` / `Delete` removes an instance with confirmation; `r` replaces its preset with confirmation; `[` / `]` changes instance order
-- Edit Layout: adjust Enabled, Placement, Layer, and Z-index; the final instance cannot be deleted
-- `Space` — pause or resume without restarting
-- `f` — toggle fullscreen preview
-- `s` — save `~/.config/ascii-animation/scene.toml`
-- `c` — open the wrapped, scrollable export panel
-- `?` — open complete keyboard help
-- `q` — request quit; unsaved changes offer Save, Discard, and Cancel
+- `Enter` — activate, edit text/choices, or commit
+- `Escape` — cancel or return without quitting or committing a draft
+- `/` in Preset selection — enter search; Tab switches between typing and list navigation
+- `s` — Save; a new Scene first asks for a name, while an opened Scene updates its own target
+- `S` — Save As; create a separate target and leave the original unchanged
+- `c` — open Copy Command; new or dirty Scenes require explicit Save and Copy
+- `n` — choose a Preset for a new Scene
+- `l` — browse Saved Scenes; Enter opens, `p` plays fullscreen, and `c` opens its command
+- `v` — open Animations for advanced composition
+- Animations: `a` adds, `r` replaces with confirmation, `d`/Delete removes with confirmation, and `[`/`]` reorders
+- Inspector Layout (advanced): Enabled, Placement, Layer, Z-index, and custom region controls
+- `Space` — pause/resume without restarting; `f` enters fullscreen
+- `F1` — contextual Help/Actions on every surface; `?` also opens Help outside typing
+- `q` — request Quit; unsaved work offers Save, Discard, and Cancel
 
-Text edits support cursor movement, Home/End, Backspace, and Delete. Printable shortcut characters remain text while editing or searching. Escape restores the committed value and keeps the live session running.
-Invalid drafts keep the committed Scene unchanged. The inspector shows a concise validation reason beside the draft and in the status line, including at the minimum supported 36-column layout.
+Fullscreen always shows Pause/Resume, Back, and Help, even when the Canvas fits. Help/Actions exposes controls that do not fit the compact action strip. Mouse clicks use the same validated actions; wheel scrolling selects or scrolls the relevant pane without editing values. Dragging is not required.
 
-The unsaved marker applies to every Scene, including new defaults and normalized startup settings. A failed save keeps the Scene in memory and leaves prior saved data recoverable. Invalid startup files offer Reload or an unsaved default without overwriting the original.
+Text, search, and names own printable shortcut characters. Text edits support arrows, Home/End, Backspace, and Delete. Escape restores committed values; invalid drafts keep the committed Scene unchanged.
 
-Export uses committed settings only. Configuration-backed export offers **Save and Copy** when the Scene is unsaved, and copies only after saving succeeds. Clipboard failure leaves the full command visible for manual copying. Viewing export never silently saves.
+Saved names allow 1–80 ASCII letters, digits, spaces, `-`, and `_`. Save As to an existing name identifies the target and asks before overwriting. Canceled or failed saves preserve the editing Scene, existing files, and current target. New/Open/Quit never silently discard unsaved work.
+
+The library previews and reopens complete Scenes, including all instances, disabled states, options, Placement, Layer, Z-index, order, frame rate, and color. Existing default configurations remain accessible. Obsolete or invalid options are normalized in memory; Play/Copy routes through Open/Edit and an explicit Save when updating the file is necessary. Invalid or unreadable entries and directory errors remain recoverable without overwriting files.
+
+Copy for a clean Saved Scene always references its own safely quoted absolute config path, even for one instance. Save and Copy finishes naming, conflict confirmation, and persistence before touching the clipboard. Clipboard failure retains the saved file and a scrollable manual command with an honest error. Commands depend on local files: saving B does not change A, but a later Save on A intentionally updates what A's existing command plays.
+
+Save captures configuration, not elapsed time, simulation history, a frame, or a video. Reopening or running the command starts a fresh animation session.
 
 Adapted algorithms and exact upstream revisions are recorded in `THIRD_PARTY_NOTICES`, including their MIT notices and text-effect attribution chain.
 
@@ -164,14 +173,16 @@ You can also point at an explicit config file:
 ascii-animation run --config ./scene.toml
 ```
 
-### 4. Export behavior
-
-- Single-instance scenes export as a direct command such as `ascii-animation run galaxy ...`
-- Multi-instance or non-directly-exportable scenes export as:
+Named Saved Scenes can be played without opening the TUI:
 
 ```sh
-ascii-animation run --config ~/.config/ascii-animation/scene.toml
+ascii-animation run --config "$HOME/.config/ascii-animation/saved-scenes/Scene A.toml"
 ```
+
+### 4. Export behavior
+
+- The TUI copies references to each Saved Scene's own config file, not references to whichever Scene was saved last.
+- Existing direct Preset flags and CLI command generation remain available. `--scene default` still refers only to the existing default configuration; arbitrary named lookup uses `--config`.
 
 ## Development
 
