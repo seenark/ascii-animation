@@ -826,8 +826,8 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                 KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => choice = 1 - choice,
                 KeyCode::Enter if choice == 1 => { state.close(); return Ok(TuiAction::Continue); },
                 KeyCode::Enter | KeyCode::Char('c') => {
-                    if let Some(command) = &command {
-                        let copied = command.clone();
+                    if let Some(saved_command) = &command {
+                        let copied = saved_command.clone();
                         state.dialog = Dialog::Export { scroll, choice, command };
                         return Ok(TuiAction::CopyCommand(copied));
                     }
@@ -1015,7 +1015,7 @@ fn available_actions(state: &TuiState, underlay: bool) -> Vec<(&'static str, Key
     let dialog = if underlay { state.underlays.last().map(|underlay| &underlay.dialog).unwrap_or(&state.dialog) } else { &state.dialog };
     let pairs: Vec<(&str, KeyCode)> = match dialog {
         Dialog::Browser(browser) if browser.typing => vec![("Edit", KeyCode::Enter), ("Stop typing", KeyCode::Tab), ("Cancel", KeyCode::Esc)],
-        Dialog::Browser(browser) => vec![("Edit", KeyCode::Enter), ("Saved Scenes", KeyCode::Char('l')), ("Search", KeyCode::Char('/')), ("Back", KeyCode::Esc), ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')),
+        Dialog::Browser(_) => vec![("Edit", KeyCode::Enter), ("Saved Scenes", KeyCode::Char('l')), ("Search", KeyCode::Char('/')), ("Back", KeyCode::Esc), ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')),
             ("Preview/List", KeyCode::Char('w')), ("Type search", KeyCode::Tab)],
         Dialog::Saved(_) => vec![("Open/Edit", KeyCode::Enter), ("Play", KeyCode::Char('p')), ("Copy Command", KeyCode::Char('c')), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Error details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))],
         Dialog::Name { .. } => vec![("Save", KeyCode::Enter), ("Cancel", KeyCode::Esc)],
