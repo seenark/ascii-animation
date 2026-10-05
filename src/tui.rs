@@ -1070,9 +1070,10 @@ fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     state.hit_targets.push(HitTarget { area: Rect::new(area.x, area.y, help_text.len().min(area.width as usize) as u16, 1), action: HitAction::Key(help.1) });
     let guidance = if typing { "Typing text; Esc cancels. F1 Help." } else if matches!(state.dialog, Dialog::None) && state.focus == PaneFocus::Inspector { "Up/Down select; arrows adjust; Shift fast" } else { state.copy_status.as_deref().or(state.status.as_deref()).unwrap_or("Tab focus; Up/Down select; Enter act") };
     let mut x = area.x; let mut y = area.y + 1;
-    let start = state.focused_action.map(|index| index.saturating_sub(1)).unwrap_or(0);
+    let focused = match &state.dialog { Dialog::Export { choice, .. } => Some(*choice), _ => state.focused_action };
+    let start = focused.map(|index| index.saturating_sub(1)).unwrap_or(0);
     for (index, (label, key)) in actions.into_iter().enumerate().skip(start) {
-        let text = format!("[{}{} {}]", if state.focused_action == Some(index) { ">" } else { "" }, key_label(key), label);
+        let text = format!("[{}{} {}]", if focused == Some(index) { ">" } else { "" }, key_label(key), label);
         let width = text.len() as u16;
         if width > area.width { continue; }
         if x + width > area.right() { x = area.x; y += 1; }

@@ -502,3 +502,67 @@ fn unreadable_library_remains_visible_while_readable_default_can_play_copy_and_o
     assert_eq!(std::fs::read(&default_path).unwrap(), original);
     assert_eq!(std::fs::read(&named_path).unwrap(), named_original);
 }
+
+#[test]
+fn command_focus_visibly_identifies_the_control_that_enter_activates_at_every_supported_size() {
+    use ascii_animation::tui::TuiEvent;
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Enter);
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Command Focus");
+    key(&mut state, KeyCode::Enter);
+    let path = state.config_path().to_path_buf();
+    let saved_bytes = std::fs::read(&path).unwrap();
+    for (width, height) in [(120, 38), (80, 24), (60, 18), (36, 10)] {
+        key(&mut state, KeyCode::Char('l'));
+        if !state.is_paused() { key(&mut state, KeyCode::Char(' ')); }
+        key(&mut state, KeyCode::Char('c'));
+        assert!(screen(&mut state, width, height).contains("[>c "));
+        key(&mut state, KeyCode::Tab);
+        let back = screen(&mut state, width, height);
+        assert!(back.contains("[>Esc "));
+        assert!(!back.contains("[>c "));
+        assert_eq!(key(&mut state, KeyCode::Enter), TuiAction::Continue);
+        assert_eq!(state.surface(), Surface::SavedScenes);
+        assert_eq!(std::fs::read(&path).unwrap(), saved_bytes);
+
+        key(&mut state, KeyCode::Char('c'));
+        key(&mut state, KeyCode::Tab);
+        key(&mut state, KeyCode::BackTab);
+        key(&mut state, KeyCode::PageDown);
+        assert!(screen(&mut state, width, height).contains("[>c "));
+        let command = match key(&mut state, KeyCode::Enter) {
+            TuiAction::CopyCommand(command) => command,
+            action => panic!("{action:?}"),
+        };
+        assert!(command.contains(path.to_str().unwrap()));
+        handle_tui_event(&mut state, TuiEvent::Clipboard(Err("clipboard unavailable".into())), &build_default_registry()).unwrap();
+        assert!(screen(&mut state, width, height).contains("[>c "));
+        key(&mut state, KeyCode::Tab);
+        handle_tui_event(&mut state, TuiEvent::Clipboard(Ok(())), &build_default_registry()).unwrap();
+        assert!(screen(&mut state, width, height).contains("[>Esc "));
+        assert_eq!(key(&mut state, KeyCode::Enter), TuiAction::Continue);
+        assert_eq!(state.surface(), Surface::SavedScenes);
+        assert!(state.is_paused());
+        key(&mut state, KeyCode::Esc);
+    }
+    key(&mut state, KeyCode::Right);
+    let unsaved = state.scene.clone();
+    assert!(state.is_dirty());
+    for (width, height) in [(120, 38), (80, 24), (60, 18), (36, 10)] {
+        key(&mut state, KeyCode::Char('c'));
+        assert!(screen(&mut state, width, height).contains("[>c "));
+        key(&mut state, KeyCode::Tab);
+        assert!(screen(&mut state, width, height).contains("[>Esc "));
+        assert_eq!(key(&mut state, KeyCode::Enter), TuiAction::Continue);
+        assert_eq!(state.surface(), Surface::None);
+        assert_eq!(state.scene, unsaved);
+        assert_eq!(std::fs::read(&path).unwrap(), saved_bytes);
+    }
+    key(&mut state, KeyCode::Char('c'));
+    assert!(screen(&mut state, 36, 10).contains("[>c "));
+    assert!(matches!(key(&mut state, KeyCode::Enter), TuiAction::CopyCommand(_)));
+    assert_eq!(Scene::load_from_path(&path).unwrap(), unsaved);
+    assert!(!state.is_dirty());
+}
