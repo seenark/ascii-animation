@@ -876,12 +876,13 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                 KeyCode::Enter => {
                     if let Some((_, code)) = actions.nth(scroll as usize) {
                         state.close();
+                        state.focused_action = None;
                         return handle_key(state, KeyEvent::new(*code, KeyModifiers::NONE), registry);
                     }
                     state.dialog = Dialog::Help(scroll);
                 }
                 KeyCode::Char(ch) if actions.any(|(_, code)| *code == KeyCode::Char(ch)) => {
-                    state.close(); return handle_key(state, key, registry);
+                    state.close(); state.focused_action = None; return handle_key(state, key, registry);
                 }
                 _ => state.dialog = Dialog::Help(scroll),
             }
@@ -980,6 +981,7 @@ fn handle_mouse(state: &mut TuiState, mouse: MouseEvent, registry: &PresetRegist
             }
             Some(HitAction::HelpAction(code)) => {
                 state.close();
+                state.focused_action = None;
                 return handle_key(state, KeyEvent::new(code, KeyModifiers::NONE), registry);
             }
             Some(HitAction::Preset(index)) => {

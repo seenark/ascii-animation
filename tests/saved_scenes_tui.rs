@@ -694,3 +694,54 @@ fn saved_preview_pause_is_available_by_visible_mouse_control_and_help_action() {
     assert!(!state.is_dirty());
     assert_eq!(Scene::load_from_path(state.config_path()).unwrap(), state.scene);
 }
+
+#[test]
+fn help_save_overrides_restored_cancel_focus_for_mouse_and_keyboard_but_back_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Enter);
+    let scene = state.scene.clone();
+    key(&mut state, KeyCode::Char('s'));
+    type_text(&mut state, "Mouse Help Save");
+    key(&mut state, KeyCode::Tab);
+    key(&mut state, KeyCode::Tab);
+    key(&mut state, KeyCode::F(1));
+    assert_eq!(click_label(&mut state, "Enter: Save", 80, 24), TuiAction::Continue);
+    let mouse_path = dir.path().join("saved-scenes/Mouse Help Save.toml");
+    assert_eq!(state.config_path(), mouse_path);
+    assert_eq!(Scene::load_from_path(&mouse_path).unwrap(), scene);
+    assert!(!state.is_dirty());
+    let mouse_bytes = std::fs::read(&mouse_path).unwrap();
+
+    key(&mut state, KeyCode::Char('S'));
+    type_text(&mut state, "Keyboard Help Save");
+    key(&mut state, KeyCode::Tab);
+    key(&mut state, KeyCode::Tab);
+    key(&mut state, KeyCode::F(1));
+    assert_eq!(key(&mut state, KeyCode::Enter), TuiAction::Continue);
+    let keyboard_path = dir.path().join("saved-scenes/Keyboard Help Save.toml");
+    assert_eq!(state.config_path(), keyboard_path);
+    assert_eq!(Scene::load_from_path(&keyboard_path).unwrap(), scene);
+    assert!(!state.is_dirty());
+    assert_eq!(std::fs::read(&mouse_path).unwrap(), mouse_bytes);
+
+    key(&mut state, KeyCode::Char('S'));
+    type_text(&mut state, "Back Must Not Save");
+    key(&mut state, KeyCode::Tab);
+    key(&mut state, KeyCode::Tab);
+    key(&mut state, KeyCode::F(1));
+    click_label(&mut state, "Esc Back", 80, 24);
+    assert_eq!(state.surface(), Surface::Naming);
+    assert_eq!(state.draft_text(), Some("Back Must Not Save"));
+    assert!(screen(&mut state, 80, 24).contains("[>Esc "));
+    key(&mut state, KeyCode::F(1));
+    key(&mut state, KeyCode::Esc);
+    assert_eq!(state.draft_text(), Some("Back Must Not Save"));
+    assert!(screen(&mut state, 80, 24).contains("[>Esc "));
+    assert_eq!(key(&mut state, KeyCode::Enter), TuiAction::Continue);
+    assert_eq!(state.surface(), Surface::None);
+    assert_eq!(state.config_path(), keyboard_path);
+    assert!(!dir.path().join("saved-scenes/Back Must Not Save.toml").exists());
+    assert_eq!(std::fs::read(&mouse_path).unwrap(), mouse_bytes);
+    assert_eq!(Scene::load_from_path(&keyboard_path).unwrap(), scene);
+}
