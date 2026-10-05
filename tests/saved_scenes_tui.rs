@@ -444,3 +444,61 @@ fn legacy_saved_options_open_as_unsaved_normalization_without_referencing_or_ove
     assert!(!state.scene.instances[0].options.contains_key("legacy-option"));
     assert_eq!(std::fs::read(&named_path).unwrap(), named_original);
 }
+
+#[cfg(unix)]
+#[test]
+fn unreadable_library_remains_visible_while_readable_default_can_play_copy_and_open() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestorePermissions {
+        path: std::path::PathBuf,
+        permissions: std::fs::Permissions,
+    }
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) { let _ = std::fs::set_permissions(&self.path, self.permissions.clone()); }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let default_path = dir.path().join("scene.toml");
+    let scene = TuiState::default_with_registry(&build_default_registry()).unwrap().scene;
+    scene.save_to_path(&default_path).unwrap();
+    let original = std::fs::read(&default_path).unwrap();
+    let library = dir.path().join("saved-scenes");
+    std::fs::create_dir(&library).unwrap();
+    let named_path = library.join("Hidden Scene.toml");
+    scene.save_to_path(&named_path).unwrap();
+    let named_original = std::fs::read(&named_path).unwrap();
+    let restore = RestorePermissions { path: library.clone(), permissions: std::fs::metadata(&library).unwrap().permissions() };
+    std::fs::set_permissions(&library, std::fs::Permissions::from_mode(0)).unwrap();
+    if std::fs::read_dir(&library).is_ok() { return; } // Privileged execution can bypass mode bits.
+
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Char('l'));
+    assert!(screen(&mut state, 120, 32).contains("Cannot read Saved Scenes"));
+    key(&mut state, KeyCode::Char('e'));
+    assert_eq!(state.surface(), Surface::Recovery);
+    assert!(screen(&mut state, 120, 32).contains("permissions"));
+    key(&mut state, KeyCode::Esc);
+    key(&mut state, KeyCode::Char('p'));
+    assert!(state.fullscreen());
+    key(&mut state, KeyCode::Esc);
+    assert!(screen(&mut state, 120, 32).contains("Cannot read Saved Scenes"));
+    key(&mut state, KeyCode::Char('c'));
+    let command = match key(&mut state, KeyCode::Enter) {
+        TuiAction::CopyCommand(command) => command,
+        action => panic!("{action:?}"),
+    };
+    assert!(command.contains(default_path.to_str().unwrap()));
+    key(&mut state, KeyCode::Esc);
+    key(&mut state, KeyCode::Enter);
+    assert_eq!(state.config_path(), default_path);
+    assert_eq!(state.scene, scene);
+    assert!(!state.is_dirty());
+    assert_eq!(std::fs::read(&default_path).unwrap(), original);
+    key(&mut state, KeyCode::Char('l'));
+    drop(restore);
+    key(&mut state, KeyCode::Char('r'));
+    let shown = screen(&mut state, 120, 32);
+    assert!(shown.contains("Hidden Scene"));
+    assert!(!shown.contains("Cannot read Saved Scenes"));
+    assert_eq!(std::fs::read(&default_path).unwrap(), original);
+    assert_eq!(std::fs::read(&named_path).unwrap(), named_original);
+}

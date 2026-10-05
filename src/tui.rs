@@ -51,7 +51,7 @@ struct Browser { search: String, cursor: usize, names: Vec<String>, selected: us
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BrowserPurpose { New, Add, Replace }
 struct SavedEntry { name: String, path: PathBuf }
-struct SavedBrowser { entries: Vec<SavedEntry>, selected: usize, scroll: usize, previewing: bool, needs_save: bool, error: Option<String> }
+struct SavedBrowser { entries: Vec<SavedEntry>, selected: usize, scroll: usize, previewing: bool, needs_save: bool, directory_error: Option<String>, error: Option<String> }
 #[derive(Clone)]
 enum Transition { New(String), Open(PathBuf, String), Quit }
 enum AfterSave { Stay, Copy, Transition(Transition) }
@@ -486,7 +486,7 @@ impl TuiState {
         if self.default_path.try_exists().unwrap_or(true) {
             entries.push(SavedEntry { name: "Default (existing configuration)".into(), path: self.default_path.clone() });
         }
-        self.overlay(Dialog::Saved(SavedBrowser { entries, selected: 0, scroll: 0, previewing: false, needs_save: false, error }));
+        self.overlay(Dialog::Saved(SavedBrowser { entries, selected: 0, scroll: 0, previewing: false, needs_save: false, directory_error: error, error: None }));
         self.refresh_saved(registry);
         Ok(())
     }
@@ -766,7 +766,11 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                     state.close(); state.browse_saved(registry)?; return Ok(TuiAction::Continue);
                 }
                 KeyCode::Char('e') => {
-                    let error = browser.error.clone().unwrap_or_else(|| "Selected Saved Scene can be opened. r retries reading; Esc returns.".into());
+                    let error = match (&browser.directory_error, &browser.error) {
+                        (Some(directory), Some(entry)) => format!("{directory}\n\n{entry}"),
+                        (Some(error), None) | (None, Some(error)) => error.clone(),
+                        (None, None) => "Selected Saved Scene can be opened. r retries reading; Esc returns.".into(),
+                    };
                     state.dialog = Dialog::Saved(browser);
                     state.overlay(Dialog::ReadError { error, scroll: 0 });
                     return Ok(TuiAction::Continue);
@@ -1356,10 +1360,11 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
             frame.render_widget(Paragraph::new(description).wrap(Wrap { trim: false }).scroll((browser.description_scroll, 0)), Rect::new(inner.x, inner.y + 1 + rows as u16, inner.width, details));
         }
         Dialog::Saved(browser) => {
+            let notice = browser.directory_error.as_deref().or(browser.error.as_deref());
             if browser.entries.is_empty() {
-                frame.render_widget(Paragraph::new(browser.error.as_deref().unwrap_or("No Saved Scenes yet. New chooses a Preset; Edit and Save name your first Scene.")).wrap(Wrap { trim: false }), inner);
+                frame.render_widget(Paragraph::new(notice.unwrap_or("No Saved Scenes yet. New chooses a Preset; Edit and Save name your first Scene.")).wrap(Wrap { trim: false }), inner);
             } else {
-                let error_height = if browser.error.is_some() { inner.height.min(3) } else { 0 };
+                let error_height = if notice.is_some() { inner.height.min(3) } else { 0 };
                 let rows = inner.height.saturating_sub(error_height) as usize;
                 keep_visible(&mut browser.scroll, browser.selected, rows);
                 for (row, (index, entry)) in browser.entries.iter().enumerate().skip(browser.scroll).take(rows).enumerate() {
@@ -1367,7 +1372,7 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
                     frame.render_widget(Paragraph::new(format!("{} {}", if index == browser.selected { ">" } else { " " }, entry.name)).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
                     state.hit_targets.push(HitTarget { area: target, action: HitAction::Saved(index) });
                 }
-                if let Some(error) = &browser.error { frame.render_widget(Paragraph::new(error.as_str()).wrap(Wrap { trim: false }), Rect::new(inner.x, inner.y + rows as u16, inner.width, error_height)); }
+                if let Some(notice) = notice { frame.render_widget(Paragraph::new(notice).wrap(Wrap { trim: false }), Rect::new(inner.x, inner.y + rows as u16, inner.width, error_height)); }
             }
         }
         _ => {},
@@ -1405,7 +1410,11 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
                 }
                 Dialog::SaveError { request, error, .. } => format!("{}\n{error}", request.path.display()),
                 Dialog::ReadError { error, .. } => error.clone(),
-                Dialog::Saved(browser) => browser.error.clone().unwrap_or_else(|| "Saved Scenes preserve complete configuration. Open/Edit replaces work only after the unsaved-work guard.".into()),
+                Dialog::Saved(browser) => match (&browser.directory_error, &browser.error) {
+                    (Some(directory), Some(entry)) => format!("{directory}\n\n{entry}"),
+                    (Some(error), None) | (None, Some(error)) => error.clone(),
+                    (None, None) => "Saved Scenes preserve complete configuration. Open/Edit replaces work only after the unsaved-work guard.".into(),
+                },
                 Dialog::None if state.focus == PaneFocus::Inspector => {
                     state.fields.get(state.selected_option).map(|field| format!("{}: {}\n{}\nLeft/Right adjusts; Shift adjusts numeric values faster. Enter edits text and choices.", field.label, state.field_value(&field.name).map(|value| format_tui_option_value(&value)).unwrap_or_default(), field.help)).unwrap_or_default()
                 }
