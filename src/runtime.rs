@@ -332,7 +332,7 @@ pub fn scene_viewport_size_for_terminal(
     Ok(viewport_for_canvas(logical_width, terminal_width, terminal_height))
 }
 
-fn viewport_for_canvas(logical_width: u16, terminal_width: u16, terminal_height: u16) -> (u16, u16) {
+pub(crate) fn viewport_for_canvas(logical_width: u16, terminal_width: u16, terminal_height: u16) -> (u16, u16) {
     let (base_width, base_height) =
         animation_viewport_size_for_terminal(terminal_width, terminal_height);
     let expanded_width = if logical_width > DEFAULT_SCENE_WIDTH {

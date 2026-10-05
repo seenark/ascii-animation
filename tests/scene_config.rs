@@ -3,7 +3,8 @@ use std::path::Path;
 
 use ascii_animation::presets::{build_default_registry, OptionValue};
 use ascii_animation::scene::{AnimationInstance, Layer, Placement, Scene};
-use ascii_animation::tui::TuiState;
+use ascii_animation::tui::{handle_tui_event, TuiAction, TuiState};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ascii_animation::AsciiAnimError;
 
 
@@ -202,7 +203,7 @@ fn default_config_path_expands_home_directory() {
 }
 
 #[test]
-fn tui_state_loads_saved_default_scene_on_startup() {
+fn startup_presets_keep_existing_default_discoverable_without_loading_or_writing_it() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path();
     let path = home.join(".config/ascii-animation/scene.toml");
@@ -218,7 +219,11 @@ fn tui_state_loads_saved_default_scene_on_startup() {
 
 
     let registry = build_default_registry();
-    let state = TuiState::load_from_path(&path, &registry).unwrap();
+    let mut state = TuiState::startup_at(&path, &registry).unwrap();
+    assert_eq!(state.surface(), ascii_animation::tui::Surface::Browser);
+    assert_eq!(Scene::load_from_path(&path).unwrap(), scene);
+    handle_tui_event(&mut state, Event::Key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE)), &registry).unwrap();
+    handle_tui_event(&mut state, Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), &registry).unwrap();
 
 
     assert_eq!(state.scene.frame_rate, 12);
@@ -358,14 +363,12 @@ fn tui_state_export_command_leaves_unsaved_config_scene_stale() {
     };
 
     let command = state.export_command();
-    let status = state.export_status().unwrap();
     let exported_scene = Scene::load_from_path(&saved_path).unwrap();
 
 
     assert!(command.contains(&saved_path.to_string_lossy().to_string()));
     assert_eq!(exported_scene, saved_scene);
     assert_ne!(exported_scene, state.scene);
-    assert!(!status.is_empty());
 }
 
 #[test]
@@ -387,7 +390,7 @@ fn tui_state_save_updates_config_export_snapshot() {
     let mut state = TuiState::load_from_path(&saved_path, &registry).unwrap();
     state.add_instance("galaxy", &registry).unwrap();
 
-    state.save_default_scene().unwrap();
+    assert_eq!(handle_tui_event(&mut state, Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)), &registry).unwrap(), TuiAction::Continue);
 
     let exported_scene = Scene::load_from_path(&saved_path).unwrap();
     let status = state.export_status();

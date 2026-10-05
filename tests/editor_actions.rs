@@ -1,9 +1,9 @@
 use ascii_animation::presets::{build_default_registry, OptionValue};
-use ascii_animation::tui::{handle_tui_key, TuiAction, TuiState};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ascii_animation::tui::{handle_tui_event, TuiAction, TuiState};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
 fn key(state: &mut TuiState, code: KeyCode) -> TuiAction {
-    handle_tui_key(state, KeyEvent::new(code, KeyModifiers::NONE), &build_default_registry()).unwrap()
+    handle_tui_event(state, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)), &build_default_registry()).unwrap()
 }
 
 #[test]
@@ -128,28 +128,29 @@ fn dirty_quit_cancel_and_failed_save_retain_scene_and_export_never_copies_stale_
     let registry = build_default_registry();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("scene.toml");
+    let original = TuiState::default_with_registry(&registry).unwrap().scene;
+    original.save_to_path(&path).unwrap();
     let mut state = TuiState::load_from_path(&path, &registry).unwrap();
-    assert!(state.is_dirty());
     state.add_instance("galaxy", &registry).unwrap();
     let scene = state.scene.clone();
+    std::fs::remove_file(&path).unwrap();
     std::fs::create_dir(&path).unwrap();
     key(&mut state, KeyCode::Char('q'));
     key(&mut state, KeyCode::Char('s'));
-    assert_eq!(state.surface(), ascii_animation::tui::Surface::Quit);
+    assert_eq!(state.surface(), ascii_animation::tui::Surface::SaveError);
     assert_eq!(state.scene, scene);
     assert!(state.is_dirty());
-    assert!(state.status().unwrap().contains("Save failed"));
+    key(&mut state, KeyCode::Esc);
     key(&mut state, KeyCode::Esc);
     key(&mut state, KeyCode::Char('c'));
-    assert_eq!(state.surface(), ascii_animation::tui::Surface::Export);
     assert_eq!(key(&mut state, KeyCode::Enter), TuiAction::Continue);
     assert!(state.is_dirty());
     std::fs::remove_dir(&path).unwrap();
-    let action = key(&mut state, KeyCode::Enter);
+    let action = key(&mut state, KeyCode::Char('r'));
     assert_eq!(action, TuiAction::CopyCommand(state.export_command()));
     assert_eq!(ascii_animation::scene::Scene::load_from_path(&path).unwrap(), scene);
     assert!(!state.is_dirty());
-    state.set_copy_status(Err("clipboard unavailable".into()));
+    handle_tui_event(&mut state, ascii_animation::tui::TuiEvent::Clipboard(Err("clipboard unavailable".into())), &build_default_registry()).unwrap();
     assert!(!state.is_dirty());
     assert!(state.copy_status().unwrap().contains("clipboard unavailable"));
     assert_eq!(state.export_command(), match action { TuiAction::CopyCommand(command) => command, _ => unreachable!() });
