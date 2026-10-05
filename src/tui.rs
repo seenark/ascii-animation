@@ -127,11 +127,11 @@ impl std::fmt::Display for ValueLabel<'_> {
         }
     }
 }
-fn preview_error_text(error: &AsciiAnimError, status: &mut Option<String>) -> Text<'static> {
+fn preview_error_text(error: &AsciiAnimError, status: &mut Option<String>, visible: bool) -> Option<Text<'static>> {
     let message = error.to_string();
-    let text = Text::from(message.lines().map(|line| {
+    let text = visible.then(|| Text::from(message.lines().map(|line| {
         if line.is_empty() { Line::default() } else { Line::from(Span::raw(line.to_owned())) }
-    }).collect::<Vec<_>>());
+    }).collect::<Vec<_>>()));
     *status = Some(message);
     text
 }
@@ -270,25 +270,28 @@ impl TuiState {
         }
     }
     pub fn preview_text(&mut self, width: u16, height: u16) -> Text<'static> {
+        self.draw_preview(width, height, true).expect("Visible preview produces text")
+    }
+    fn draw_preview(&mut self, width: u16, height: u16, visible: bool) -> Option<Text<'static>> {
         // Draw the live session even behind a draft so stateful entries continue advancing.
         let live = self.session.draw(width, height);
         match live {
-            Err(err) => preview_error_text(&err, &mut self.status),
+            Err(err) => preview_error_text(&err, &mut self.status, visible),
             Ok(frame) => {
                 if matches!(self.dialog, Dialog::Saved(_)) && self.temporary.is_none() {
-                    return Text::from("Preview unavailable. Select a readable Saved Scene or choose New. e shows error details; r retries reading.");
+                    return visible.then(|| Text::from("Preview unavailable. Select a readable Saved Scene or choose New. e shows error details; r retries reading."));
                 }
                 if matches!(&self.dialog, Dialog::Browser(browser) if browser.names.is_empty()) {
-                    return Text::from("No matching Preset. Edit search or Escape to return.");
+                    return visible.then(|| Text::from("No matching Preset. Edit search or Escape to return."));
                 }
                 let temporary = self.temporary.as_mut().or_else(|| self.underlays.last_mut().and_then(|underlay| underlay.preview.as_mut()));
                 if let Some(temporary) = temporary {
                     let color = temporary.scene().color;
                     match temporary.draw(width, height) {
-                        Ok(frame) => frame_to_text(frame, color),
-                        Err(err) => preview_error_text(&err, &mut self.status),
+                        Ok(frame) => visible.then(|| frame_to_text(frame, color)),
+                        Err(err) => preview_error_text(&err, &mut self.status, visible),
                     }
-                } else { frame_to_text(frame, self.scene.color) }
+                } else { visible.then(|| frame_to_text(frame, self.scene.color)) }
             }
         }
     }
@@ -673,7 +676,7 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
     if typing && matches!(key.code, KeyCode::Char(_)) { state.focused_action = None; }
     if action_navigation && (matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
         || (state.focused_action.is_some() && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Enter))) {
-        let mut actions = available_actions(state, false);
+        let mut actions = available_actions(state, false, None);
         let action_count = actions.clone().count();
         if action_count > 0 {
             match key.code {
@@ -900,7 +903,7 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
             state.dialog = Dialog::Export { scroll, choice, command };
         }
         Dialog::Help(mut scroll) => {
-            let mut actions = available_actions(state, true);
+            let mut actions = available_actions(state, true, None);
             match key.code {
                 KeyCode::Esc | KeyCode::Char('?') => state.close(),
                 KeyCode::Down | KeyCode::Tab => { scroll = scroll.saturating_add(1); state.dialog = Dialog::Help(scroll); },
@@ -1086,8 +1089,9 @@ impl std::fmt::Display for KeyLabel {
         else { std::fmt::Display::fmt(&self.0, formatter) }
     }
 }
-fn available_actions(state: &TuiState, underlay: bool) -> impl Iterator<Item = &'static (&'static str, KeyCode)> + Clone + 'static {
+fn available_actions(state: &TuiState, underlay: bool, dirty: Option<bool>) -> impl Iterator<Item = &'static (&'static str, KeyCode)> + Clone + 'static {
     let dialog = if underlay { state.underlays.last().map(|underlay| &underlay.dialog).unwrap_or(&state.dialog) } else { &state.dialog };
+    let is_dirty = || dirty.unwrap_or_else(|| state.is_dirty());
     let empty: &'static [(&'static str, KeyCode)] = &[];
     let (first, second, third): (&'static [(&'static str, KeyCode)], &'static [(&'static str, KeyCode)], &'static [(&'static str, KeyCode)]) = match dialog {
         Dialog::Browser(browser) if browser.typing => (&[("Edit", KeyCode::Enter), ("Stop typing", KeyCode::Tab), ("Cancel", KeyCode::Esc)], empty, empty),
@@ -1102,7 +1106,7 @@ fn available_actions(state: &TuiState, underlay: bool) -> impl Iterator<Item = &
         Dialog::Guard { .. } => (&[("Save", KeyCode::Char('s')), ("Discard", KeyCode::Char('d')), ("Cancel", KeyCode::Esc)], empty, empty),
         Dialog::Editor(_) => (&[("Commit", KeyCode::Enter), ("Cancel", KeyCode::Esc), ("Previous", KeyCode::Left), ("Next", KeyCode::Right)], empty, empty),
         Dialog::ConfirmDelete | Dialog::ConfirmReplace(_) => (&[("Confirm", KeyCode::Enter), ("Cancel", KeyCode::Esc)], empty, empty),
-        Dialog::Export { command, .. } => (if command.is_none() && state.is_dirty() {
+        Dialog::Export { command, .. } => (if command.is_none() && is_dirty() {
             &[("Save and Copy", KeyCode::Char('c')), ("Back", KeyCode::Esc)]
         } else { &[("Copy", KeyCode::Char('c')), ("Back", KeyCode::Esc)] }, empty, empty),
         Dialog::Recovery(_) => (&[("Reload", KeyCode::Char('r')), ("Unsaved defaults", KeyCode::Char('d')), ("Quit", KeyCode::Char('q'))], empty, empty),
@@ -1112,7 +1116,7 @@ fn available_actions(state: &TuiState, underlay: bool) -> impl Iterator<Item = &
         } else { &[("Pause", KeyCode::Char(' ')), ("Back", KeyCode::Esc), ("Quit", KeyCode::Char('q'))] }, empty, empty),
         Dialog::None => (
             &[("Save", KeyCode::Char('s')), ("Save As", KeyCode::Char('S'))],
-            if state.is_dirty() { &[("Save and Copy", KeyCode::Char('c'))] } else { &[("Copy Command", KeyCode::Char('c'))] },
+            if is_dirty() { &[("Save and Copy", KeyCode::Char('c'))] } else { &[("Copy Command", KeyCode::Char('c'))] },
             &[("New", KeyCode::Char('n')), ("Saved Scenes", KeyCode::Char('l')), ("Animations", KeyCode::Char('v')),
                 ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')), ("Focus pane", KeyCode::Tab)],
         ),
@@ -1126,20 +1130,20 @@ fn available_actions(state: &TuiState, underlay: bool) -> impl Iterator<Item = &
     } else { empty };
     [first, second, third, context].into_iter().flat_map(|slice| slice.iter())
 }
-fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
-    let actions = available_actions(state, false);
+fn draw_actions(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect, dirty: bool) {
+    let actions = available_actions(state, false, Some(dirty));
     let typing = matches!(&state.dialog, Dialog::Name { .. } | Dialog::Editor(Draft { value: OptionValue::Text(_), .. }))
         || matches!(&state.dialog, Dialog::Browser(browser) if browser.typing);
-    let help = if matches!(state.dialog, Dialog::Help(_)) { ("Back", KeyCode::Esc) } else { ("Help/Actions", KeyCode::F(1)) };
-    let help_text = format!("[{} {}]", KeyLabel(help.1), help.0);
-    frame.render_widget(Paragraph::new(help_text.as_str()).style(Style::default().fg(AMBER)), Rect::new(area.x, area.y, area.width, 1));
-    state.hit_targets.push(HitTarget { area: Rect::new(area.x, area.y, help_text.len().min(area.width as usize) as u16, 1), action: HitAction::Key(help.1) });
+    let (help_text, help_key) = if matches!(state.dialog, Dialog::Help(_)) { ("[Esc Back]", KeyCode::Esc) } else { ("[F1 Help/Actions]", KeyCode::F(1)) };
+    frame.render_widget(Paragraph::new(help_text).style(Style::default().fg(AMBER)), Rect::new(area.x, area.y, area.width, 1));
+    state.hit_targets.push(HitTarget { area: Rect::new(area.x, area.y, help_text.len().min(area.width as usize) as u16, 1), action: HitAction::Key(help_key) });
     let guidance = if typing { "Typing text; Esc cancels. F1 Help." } else if matches!(state.dialog, Dialog::None) && state.focus == PaneFocus::Inspector { "Up/Down select; arrows adjust; Shift fast" } else { state.copy_status.as_deref().or(state.status.as_deref()).unwrap_or("Tab focus; Up/Down select; Enter act") };
     let mut x = area.x; let mut y = area.y + 1;
     let focused = match &state.dialog { Dialog::Export { choice, .. } => Some(*choice), _ => state.focused_action };
     let start = focused.map(|index| index.saturating_sub(1)).unwrap_or(0);
+    let mut text = String::new();
     for (index, (label, key)) in actions.enumerate().skip(start) {
-        let text = format!("[{}{} {}]", if focused == Some(index) { ">" } else { "" }, KeyLabel(*key), label);
+        text.clear(); let _ = write!(text, "[{}{} {}]", if focused == Some(index) { ">" } else { "" }, KeyLabel(*key), label);
         let width = text.len() as u16;
         if width > area.width { continue; }
         if x + width > area.right() { x = area.x; y += 1; }
@@ -1329,16 +1333,17 @@ pub fn render_tui(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut 
     let browsing = matches!(state.dialog, Dialog::Browser(_) | Dialog::Saved(_));
     let compact = editor_layout(area.width, area.height) == EditorLayout::Small;
     let browser_preview = match &state.dialog { Dialog::Browser(browser) => browser.previewing, Dialog::Saved(browser) => browser.previewing, _ => false };
+    let dirty = !fullscreen && state.is_dirty();
     let generated_title;
     let title = if fullscreen { "Fullscreen playback" } else {
-        generated_title = format!("{} | {} | {}", if state.is_dirty() { "unsaved" } else { "saved" }, if state.is_paused() { "paused" } else { "running" }, state.saved_name.as_deref().unwrap_or("New Scene"));
+        generated_title = format!("{} | {} | {}", if dirty { "unsaved" } else { "saved" }, if state.is_paused() { "paused" } else { "running" }, state.saved_name.as_deref().unwrap_or("New Scene"));
         generated_title.as_str()
     };
     frame.render_widget(Paragraph::new(title).style(Style::default().fg(AMBER)), Rect::new(area.x, area.y, area.width, 1));
     let preview_area = if fullscreen { Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(4)) } else { layout.preview };
     let (width, height) = crate::runtime::viewport_for_canvas(state.active_preview().canvas_dimensions().0, area.width, area.height);
-    let preview = state.preview_text(width, height);
-    if fullscreen || !compact || (browsing && browser_preview) || (!browsing && state.view == EditorView::Preview) {
+    let preview_visible = fullscreen || !compact || (browsing && browser_preview) || (!browsing && state.view == EditorView::Preview);
+    if let Some(preview) = state.draw_preview(width, height, preview_visible) {
         if fullscreen {
             frame.render_widget(Paragraph::new(preview), preview_area);
         } else {
@@ -1357,9 +1362,9 @@ pub fn render_tui(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut 
     else if matches!(state.dialog, Dialog::None) && !fullscreen {
         if state.focus == PaneFocus::Scene { draw_scene(frame, state, layout.options); }
         else if !compact || state.view == EditorView::Edit { draw_inspector(frame, state, layout.options); }
-    } else if !fullscreen && !browsing { draw_dialog(frame, state, registry, area); }
+    } else if !fullscreen && !browsing { draw_dialog(frame, state, registry, area, dirty); }
     let footer = Rect::new(area.x, area.y + area.height - 3, area.width, 3);
-    draw_actions(frame, state, footer);
+    draw_actions(frame, state, footer, dirty);
 }
 fn keep_visible(scroll: &mut usize, selected: usize, count: usize) {
     let count = count.max(1);
@@ -1367,30 +1372,32 @@ fn keep_visible(scroll: &mut usize, selected: usize, count: usize) {
     else if selected >= scroll.saturating_add(count) { *scroll = selected + 1 - count; }
 }
 fn draw_scene(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
-    let title = format!("> Animations ({})", state.scene.instances.len());
-    let block = panel(title.as_str(), true);
+    let mut text = format!("> Animations ({})", state.scene.instances.len());
+    let block = panel(text.as_str(), true);
     let inner = block.inner(area);
     keep_visible(&mut state.scene_scroll, state.selected_instance, inner.height as usize);
     frame.render_widget(block, area);
     for (row, (index, instance)) in state.scene.instances.iter().enumerate().skip(state.scene_scroll).take(inner.height as usize).enumerate() {
         let target = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-        let text = format!("{} [{}] {} ({})", if index == state.selected_instance { ">" } else { " " }, if instance.enabled { "on" } else { "off" }, instance.id, instance.preset);
+        text.clear(); let _ = write!(text, "{} [{}] {} ({})", if index == state.selected_instance { ">" } else { " " }, if instance.enabled { "on" } else { "off" }, instance.id, instance.preset);
         frame.render_widget(Paragraph::new(text.as_str()), target);
         state.hit_targets.push(HitTarget { area: target, action: HitAction::Instance(index) });
     }
 }
 fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let mut group = None; let mut selected_row = 0; let mut row = 0;
-    for (index, field) in state.fields.iter().enumerate() {
-        if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
-        if group != Some(group_index(field.group)) { row += 1; group = Some(group_index(field.group)); }
-        if index == state.selected_option { selected_row = row; }
-        row += 1;
+    if state.focus == PaneFocus::Inspector || state.fields.get(state.selected_option).is_some_and(|field| field.group != OptionGroup::Layout) {
+        for (index, field) in state.fields.iter().enumerate() {
+            if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
+            if group != Some(group_index(field.group)) { row += 1; group = Some(group_index(field.group)); }
+            if index == state.selected_option { selected_row = row; break; }
+            row += 1;
+        }
     }
     let help_height = if area.height >= 10 { 3 } else { 1 };
     let content = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(help_height));
-    let title = format!("{}Options: {}", if state.focus == PaneFocus::Inspector { "> " } else { "" }, state.selected_instance().preset);
-    let block = panel(title.as_str(), state.focus == PaneFocus::Inspector);
+    let mut text = format!("{}Options: {}", if state.focus == PaneFocus::Inspector { "> " } else { "" }, state.selected_instance().preset);
+    let block = panel(text.as_str(), state.focus == PaneFocus::Inspector);
     let inner = block.inner(content);
     keep_visible(&mut state.inspector_scroll, selected_row, inner.height as usize);
     frame.render_widget(block, content);
@@ -1398,7 +1405,7 @@ fn draw_inspector(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect) {
     let end = scroll.saturating_add(inner.height as usize);
     let target_for = |row: usize| (row >= scroll && row < end).then(|| Rect::new(inner.x, inner.y + (row - scroll) as u16, inner.width, 1));
     let help_area = Rect::new(area.x + 1, content.y + content.height, area.width.saturating_sub(2), help_height);
-    let mut text = String::new(); let mut guidance_drawn = false;
+    let mut guidance_drawn = false;
     group = None; row = 0;
     for (index, field) in state.fields.iter().enumerate() {
         if field.group == OptionGroup::Layout && state.focus != PaneFocus::Inspector { continue; }
@@ -1447,14 +1454,14 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
     frame.render_widget(block, area);
     match &mut state.dialog {
         Dialog::Browser(browser) => {
-            let search = format!("{}Find: {}", if browser.typing { "> " } else { "  " }, cursor_window(&browser.search, browser.cursor, inner.width.saturating_sub(8) as usize));
-            frame.render_widget(Paragraph::new(search.as_str()), Rect::new(inner.x, inner.y, inner.width, 1));
+            let mut text = format!("{}Find: {}", if browser.typing { "> " } else { "  " }, cursor_window(&browser.search, browser.cursor, inner.width.saturating_sub(8) as usize));
+            frame.render_widget(Paragraph::new(text.as_str()), Rect::new(inner.x, inner.y, inner.width, 1));
             let details = if inner.height >= 8 { 3 } else { 1 };
             let rows = inner.height.saturating_sub(1 + details) as usize;
             let start = browser.selected.saturating_sub(rows.saturating_sub(1));
             for (row, (index, name)) in browser.names.iter().enumerate().skip(start).take(rows).enumerate() {
                 let target = Rect::new(inner.x, inner.y + 1 + row as u16, inner.width, 1);
-                let text = format!("{} {}", if index == browser.selected { ">" } else { " " }, registry.get(name).expect("registered Preset").label());
+                text.clear(); let _ = write!(text, "{} {}", if index == browser.selected { ">" } else { " " }, registry.get(name).expect("registered Preset").label());
                 frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
                 state.hit_targets.push(HitTarget { area: target, action: HitAction::Preset(index) });
             }
@@ -1469,9 +1476,10 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
                 let error_height = if notice.is_some() { inner.height.min(3) } else { 0 };
                 let rows = inner.height.saturating_sub(error_height) as usize;
                 keep_visible(&mut browser.scroll, browser.selected, rows);
+                let mut text = String::new();
                 for (row, (index, entry)) in browser.entries.iter().enumerate().skip(browser.scroll).take(rows).enumerate() {
                     let target = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
-                    let text = format!("{} {}", if index == browser.selected { ">" } else { " " }, entry.name);
+                    text.clear(); let _ = write!(text, "{} {}", if index == browser.selected { ">" } else { " " }, entry.name);
                     frame.render_widget(Paragraph::new(text.as_str()).style(Style::default().fg(if index == browser.selected { AMBER } else { PAPER })), target);
                     state.hit_targets.push(HitTarget { area: target, action: HitAction::Saved(index) });
                 }
@@ -1482,10 +1490,10 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
     }
 }
 
-fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRegistry, area: Rect) {
+fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRegistry, area: Rect, dirty: bool) {
     let modal = modal_area(area, 82, 18);
     frame.render_widget(Clear, modal);
-    let help_actions = matches!(state.dialog, Dialog::Help(_)).then(|| available_actions(state, true));
+    let help_actions = matches!(state.dialog, Dialog::Help(_)).then(|| available_actions(state, true, Some(dirty)));
     let (title, text, scroll): (Cow<'_, str>, String, u16) = match &state.dialog {
         Dialog::Name { text, cursor, error, .. } => ("Name Saved Scene".into(), format!("{}\n{}\nTyping owns shortcuts. Enter saves; Esc cancels; F1 Help.", cursor_window(text, *cursor, modal.width.saturating_sub(4) as usize), error.as_deref().unwrap_or("1–80 ASCII letters, digits, spaces, - or _. Save preserves configuration, not runtime history.")), 0),
         Dialog::Overwrite(request) => ("Overwrite Saved Scene?".into(), format!("Replace {}?\n{}\nExisting configuration is lost only after a successful save. Enter/y confirms; Esc/n cancels.", request.name, request.path.display()), 0),
@@ -1507,7 +1515,7 @@ fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRe
             let generated;
             let text = match command.as_deref() {
                 Some(command) => command,
-                None if state.is_dirty() => "Save and Copy creates a saved target before copying.",
+                None if dirty => "Save and Copy creates a saved target before copying.",
                 None => { generated = state.export_command(); &generated },
             };
             ("Copy playback command".into(), format!("{text}\n\nUses a local Scene file on this machine. Later Save updates the same target; another Scene has its own file.\n{}\n{}\nUp/Down/PgUp/PgDn scroll; Esc returns.",

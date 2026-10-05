@@ -745,3 +745,43 @@ fn help_save_overrides_restored_cancel_focus_for_mouse_and_keyboard_but_back_kee
     assert_eq!(std::fs::read(&mouse_path).unwrap(), mouse_bytes);
     assert_eq!(Scene::load_from_path(&keyboard_path).unwrap(), scene);
 }
+
+#[test]
+fn compact_hidden_preset_and_saved_previews_keep_stateful_history_when_shown_again() {
+    use ascii_animation::tui::TuiEvent;
+    use std::time::Duration;
+    let dir = tempfile::tempdir().unwrap();
+    let registry = build_default_registry();
+    let mut writer = startup(dir.path());
+    key(&mut writer, KeyCode::Char('/'));
+    type_text(&mut writer, "fire");
+    key(&mut writer, KeyCode::Enter);
+    key(&mut writer, KeyCode::Char('s'));
+    type_text(&mut writer, "Heat History");
+    key(&mut writer, KeyCode::Enter);
+    let saved_path = writer.config_path().to_path_buf();
+    let saved_bytes = std::fs::read(&saved_path).unwrap();
+    for saved_browser in [false, true] {
+        let mut hidden = startup(dir.path());
+        let mut visible = startup(dir.path());
+        for state in [&mut hidden, &mut visible] {
+            if saved_browser { key(state, KeyCode::Char('l')); }
+            else {
+                key(state, KeyCode::Char('/'));
+                type_text(state, "fire");
+                key(state, KeyCode::Esc);
+            }
+        }
+        key(&mut visible, KeyCode::Char('w'));
+        for _ in 0..64 {
+            handle_tui_event(&mut hidden, TuiEvent::Advance(Duration::from_millis(50)), &registry).unwrap();
+            handle_tui_event(&mut visible, TuiEvent::Advance(Duration::from_millis(50)), &registry).unwrap();
+            screen(&mut hidden, 36, 10);
+            screen(&mut visible, 36, 10);
+        }
+        key(&mut hidden, KeyCode::Char('w'));
+        assert_eq!(screen(&mut hidden, 120, 38), screen(&mut visible, 120, 38));
+        assert_eq!(hidden.elapsed_seconds(), visible.elapsed_seconds());
+        assert_eq!(std::fs::read(&saved_path).unwrap(), saved_bytes);
+    }
+}
