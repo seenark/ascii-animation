@@ -51,7 +51,7 @@ struct Browser { search: String, cursor: usize, names: Vec<String>, selected: us
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BrowserPurpose { New, Add, Replace }
 struct SavedEntry { name: String, path: PathBuf }
-struct SavedBrowser { entries: Vec<SavedEntry>, selected: usize, scroll: usize, previewing: bool, error: Option<String> }
+struct SavedBrowser { entries: Vec<SavedEntry>, selected: usize, scroll: usize, previewing: bool, needs_save: bool, error: Option<String> }
 #[derive(Clone)]
 enum Transition { New(String), Open(PathBuf, String), Quit }
 enum AfterSave { Stay, Copy, Transition(Transition) }
@@ -486,7 +486,7 @@ impl TuiState {
         if self.default_path.try_exists().unwrap_or(true) {
             entries.push(SavedEntry { name: "Default (existing configuration)".into(), path: self.default_path.clone() });
         }
-        self.overlay(Dialog::Saved(SavedBrowser { entries, selected: 0, scroll: 0, previewing: false, error }));
+        self.overlay(Dialog::Saved(SavedBrowser { entries, selected: 0, scroll: 0, previewing: false, needs_save: false, error }));
         self.refresh_saved(registry);
         Ok(())
     }
@@ -494,8 +494,18 @@ impl TuiState {
         self.temporary = None;
         let Dialog::Saved(browser) = &mut self.dialog else { return; };
         let Some(entry) = browser.entries.get(browser.selected) else { return; };
-        match Scene::load_from_path_raw(&entry.path).and_then(|scene| SceneSession::new(scene, registry, 0)) {
-            Ok(mut session) => { session.set_paused(self.session.is_paused()); self.temporary = Some(session); browser.error = None; }
+        browser.needs_save = false;
+        match Scene::load_from_path_raw(&entry.path).and_then(|baseline| {
+            let scene = normalize_startup_scene(baseline.clone(), registry)?;
+            let needs_save = scene != baseline;
+            Ok((SceneSession::new(scene, registry, 0)?, needs_save))
+        }) {
+            Ok((mut session, needs_save)) => {
+                session.set_paused(self.session.is_paused());
+                self.temporary = Some(session);
+                browser.needs_save = needs_save;
+                browser.error = needs_save.then(|| "Saved configuration needs updating. Open/Edit, then Save before Play or Copy. File unchanged.".into());
+            }
             Err(err) => browser.error = Some(format!("Cannot open {}: {err}. File unchanged. r retries; select another entry or Esc returns.", entry.name)),
         }
     }
@@ -510,8 +520,11 @@ impl TuiState {
             Transition::Quit => return Ok(TuiAction::Quit),
             Transition::New(preset) => (Scene { frame_rate: 30, color: true, instances: vec![new_instance(&preset, &[], registry)?] }, self.default_path.clone(), None, None),
             Transition::Open(path, name) => {
-                match Scene::load_from_path_raw(&path) {
-                    Ok(scene) => { let baseline = scene.clone(); (scene, path, Some(name), Some(baseline)) },
+                match Scene::load_from_path_raw(&path).and_then(|baseline| {
+                    let scene = normalize_startup_scene(baseline.clone(), registry)?;
+                    Ok((scene, baseline))
+                }) {
+                    Ok((scene, baseline)) => (scene, path, Some(name), Some(baseline)),
                     Err(err) => {
                         self.overlay(Dialog::ReadError { error: format!("Cannot open {name}: {err}. File unchanged. Esc returns."), scroll: 0 });
                         return Ok(TuiAction::Continue);
@@ -530,6 +543,9 @@ impl TuiState {
         };
         next.default_path = default_path;
         next.saved_name = name;
+        if next.is_dirty() && next.saved_scene.is_some() {
+            next.status = Some("Saved options updated in memory. Save before Play or Copy; file unchanged.".into());
+        }
         next.resize(size.0, size.1);
         next.focus = PaneFocus::Inspector;
         next.view = EditorView::Edit;
@@ -725,7 +741,7 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                 KeyCode::Char('w') => browser.previewing = !browser.previewing,
                 KeyCode::Down if !browser.entries.is_empty() => browser.selected = (browser.selected + 1) % browser.entries.len(),
                 KeyCode::Up if !browser.entries.is_empty() => browser.selected = (browser.selected + browser.entries.len() - 1) % browser.entries.len(),
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Char('p' | 'f' | 'c') if key.code == KeyCode::Enter || browser.needs_save => {
                     if let Some(entry) = browser.entries.get(browser.selected) {
                         if state.temporary.is_some() {
                             let transition = Transition::Open(entry.path.clone(), entry.name.clone());
@@ -1017,6 +1033,7 @@ fn available_actions(state: &TuiState, underlay: bool) -> Vec<(&'static str, Key
         Dialog::Browser(browser) if browser.typing => vec![("Edit", KeyCode::Enter), ("Stop typing", KeyCode::Tab), ("Cancel", KeyCode::Esc)],
         Dialog::Browser(_) => vec![("Edit", KeyCode::Enter), ("Saved Scenes", KeyCode::Char('l')), ("Search", KeyCode::Char('/')), ("Back", KeyCode::Esc), ("Pause/Resume", KeyCode::Char(' ')), ("Fullscreen", KeyCode::Char('f')), ("Quit", KeyCode::Char('q')),
             ("Preview/List", KeyCode::Char('w')), ("Type search", KeyCode::Tab)],
+        Dialog::Saved(browser) if browser.needs_save => vec![("Open/Edit to Save", KeyCode::Enter), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))],
         Dialog::Saved(_) => vec![("Open/Edit", KeyCode::Enter), ("Play", KeyCode::Char('p')), ("Copy Command", KeyCode::Char('c')), ("New", KeyCode::Char('n')), ("Back", KeyCode::Esc), ("Retry read", KeyCode::Char('r')), ("Error details", KeyCode::Char('e')), ("Preview/List", KeyCode::Char('w'))],
         Dialog::Name { .. } => vec![("Save", KeyCode::Enter), ("Cancel", KeyCode::Esc)],
         Dialog::Overwrite(_) => vec![("Overwrite", KeyCode::Enter), ("Cancel", KeyCode::Esc)],

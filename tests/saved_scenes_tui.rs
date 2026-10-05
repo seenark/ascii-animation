@@ -389,3 +389,58 @@ fn tab_focus_can_cancel_naming_and_play_saved_scene_without_shortcut_or_mouse() 
     key(&mut state, KeyCode::Esc);
     assert_eq!(state.surface(), Surface::SavedScenes);
 }
+
+#[test]
+fn legacy_saved_options_open_as_unsaved_normalization_without_referencing_or_overwriting_raw_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let default_path = dir.path().join("scene.toml");
+    let mut legacy = TuiState::default_with_registry(&build_default_registry()).unwrap().scene;
+    legacy.instances[0].options.remove("arms");
+    legacy.instances[0].options.insert("legacy-option".into(), OptionValue::Int(9));
+    legacy.save_to_path(&default_path).unwrap();
+    let original = std::fs::read(&default_path).unwrap();
+    let mut state = startup(dir.path());
+    key(&mut state, KeyCode::Char('l'));
+    assert!(screen(&mut state, 80, 24).contains("Open/Edit"));
+    assert_eq!(std::fs::read(&default_path).unwrap(), original);
+    assert_eq!(key(&mut state, KeyCode::Char('p')), TuiAction::Continue);
+    assert_eq!(state.surface(), Surface::None);
+    assert!(!state.fullscreen());
+    assert_eq!(state.config_path(), default_path);
+    assert!(state.is_dirty());
+    assert!(!state.scene.instances[0].options.contains_key("legacy-option"));
+    assert_eq!(state.scene.instances[0].options["arms"], OptionValue::Int(3));
+    assert_eq!(std::fs::read(&default_path).unwrap(), original);
+    key(&mut state, KeyCode::Char('c'));
+    assert!(screen(&mut state, 80, 24).contains("Save and Copy"));
+    assert_eq!(std::fs::read(&default_path).unwrap(), original);
+    let command = match key(&mut state, KeyCode::Enter) {
+        TuiAction::CopyCommand(command) => command,
+        action => panic!("{action:?}"),
+    };
+    assert!(command.contains(default_path.to_str().unwrap()));
+    assert_eq!(Scene::load_from_path(&default_path).unwrap(), state.scene);
+    assert!(!state.is_dirty());
+    key(&mut state, KeyCode::Esc);
+
+    std::fs::create_dir(dir.path().join("saved-scenes")).unwrap();
+    let named_path = dir.path().join("saved-scenes/Legacy.toml");
+    legacy.save_to_path(&named_path).unwrap();
+    let named_original = std::fs::read(&named_path).unwrap();
+    key(&mut state, KeyCode::Right);
+    let current_work = state.scene.clone();
+    key(&mut state, KeyCode::Char('l'));
+    key(&mut state, KeyCode::Enter);
+    assert_eq!(state.surface(), Surface::Quit);
+    key(&mut state, KeyCode::Esc);
+    assert_eq!(state.scene, current_work);
+    assert_eq!(state.config_path(), default_path);
+    assert_eq!(std::fs::read(&named_path).unwrap(), named_original);
+    assert_eq!(key(&mut state, KeyCode::Char('c')), TuiAction::Continue);
+    assert_eq!(state.surface(), Surface::Quit);
+    key(&mut state, KeyCode::Char('d'));
+    assert_eq!(state.config_path(), named_path);
+    assert!(state.is_dirty());
+    assert!(!state.scene.instances[0].options.contains_key("legacy-option"));
+    assert_eq!(std::fs::read(&named_path).unwrap(), named_original);
+}
