@@ -138,21 +138,24 @@ fn preview_error_text(error: &AsciiAnimError, status: &mut Option<String>, visib
 
 impl TuiState {
     pub fn default_with_registry(registry: &PresetRegistry) -> Result<Self> {
+        Self::default_at(absolute_path(Scene::default_config_path())?.into_owned(), registry)
+    }
+    fn default_at(path: PathBuf, registry: &PresetRegistry) -> Result<Self> {
         let scene = Scene { frame_rate: 30, color: true, instances: vec![new_instance("galaxy", &[], registry)?] };
-        Self::from_scene(scene, registry)
+        Self::new(scene, None, path.clone(), path, registry)
     }
     pub fn from_scene(scene: Scene, registry: &PresetRegistry) -> Result<Self> {
-        Self::new(scene, None, Scene::default_config_path(), registry)
+        let path = absolute_path(Scene::default_config_path())?.into_owned();
+        Self::new(scene, None, path.clone(), path, registry)
     }
-    fn new(scene: Scene, saved_scene: Option<Scene>, config_path: PathBuf, registry: &PresetRegistry) -> Result<Self> {
-        let config_path = absolute_path(&config_path)?;
+    fn new(scene: Scene, saved_scene: Option<Scene>, config_path: PathBuf, default_path: PathBuf, registry: &PresetRegistry) -> Result<Self> {
         let session = SceneSession::new(scene, registry, 0)?;
         let scene = session.scene().clone();
         let entry_ids = session.entry_ids();
         let custom_placements = scene.instances.iter().map(|i| match i.placement {
             Placement::Custom { .. } => i.placement.clone(), _ => default_custom_placement(),
         }).collect();
-        let mut state = Self { scene, session, entry_ids, saved_scene, default_path: config_path.clone(), config_path, saved_name: None, editor_active: true,
+        let mut state = Self { scene, session, entry_ids, saved_scene, default_path, config_path, saved_name: None, editor_active: true,
             underlays: Vec::new(), playback_dialog: None, hit_targets: Vec::new(), focused_action: None, selected_instance: 0,
             selected_option: 0, fields: Vec::new(), option_names: Vec::new(), custom_placements,
             focus: PaneFocus::Preview, return_focus: PaneFocus::Preview, view: EditorView::Preview,
@@ -164,38 +167,31 @@ impl TuiState {
     pub fn load_startup(registry: &PresetRegistry) -> Result<Self> {
         Self::startup_at(Scene::default_config_path(), registry)
     }
-    pub fn startup_at(path: impl AsRef<Path>, registry: &PresetRegistry) -> Result<Self> {
-        let mut state = Self::default_with_registry(registry)?;
-        state.default_path = absolute_path(path.as_ref())?;
-        state.config_path = state.default_path.clone();
+    pub fn startup_at<'a>(path: impl Into<Cow<'a, Path>>, registry: &PresetRegistry) -> Result<Self> {
+        let mut state = Self::default_at(absolute_path(path)?.into_owned(), registry)?;
         state.editor_active = false;
         state.browse_presets(BrowserPurpose::New, registry)?;
         Ok(state)
     }
-    pub fn load_from_path(path: impl AsRef<Path>, registry: &PresetRegistry) -> Result<Self> {
-        let path = absolute_path(path.as_ref())?;
+    pub fn load_from_path<'a>(path: impl Into<Cow<'a, Path>>, registry: &PresetRegistry) -> Result<Self> {
+        let path = absolute_path(path)?.into_owned();
         let loaded = Scene::load_from_path_raw(&path);
         match loaded {
             Ok(baseline) => {
                 match normalize_startup_scene(baseline.clone(), registry)
-                    .and_then(|scene| Self::new(scene, Some(baseline), path.clone(), registry)) {
+                    .and_then(|scene| Self::new(scene, Some(baseline), path.clone(), path.clone(), registry)) {
                     Ok(mut state) => { state.saved_name = Some(path.file_stem().unwrap_or_default().to_string_lossy().into_owned()); Ok(state) },
                     Err(err) => Self::recovery(path, err.to_string(), registry),
                 }
             }
             Err(_) if matches!(path.try_exists(), Ok(false)) => {
-                let mut state = Self::default_with_registry(registry)?;
-                state.default_path = path.clone();
-                state.config_path = path;
-                Ok(state)
+                Self::default_at(path, registry)
             }
             Err(err) => Self::recovery(path, err.to_string(), registry),
         }
     }
     fn recovery(path: PathBuf, error: String, registry: &PresetRegistry) -> Result<Self> {
-        let mut state = Self::default_with_registry(registry)?;
-        state.default_path = path.clone();
-        state.config_path = path;
+        let mut state = Self::default_at(path, registry)?;
         state.startup_error = Some(error);
         state.open(Dialog::Recovery(0));
         Ok(state)
@@ -572,14 +568,13 @@ impl TuiState {
         };
         let default_path = self.default_path.clone();
         let size = self.terminal_size;
-        let mut next = match Self::new(scene, saved, path, registry) {
+        let mut next = match Self::new(scene, saved, path, default_path, registry) {
             Ok(next) => next,
             Err(err) => {
                 self.overlay(Dialog::ReadError { error: format!("Cannot open Scene: {err}. Current editor retained. Esc returns."), scroll: 0 });
                 return Ok(TuiAction::Continue);
             }
         };
-        next.default_path = default_path;
         next.saved_name = name;
         if next.is_dirty() && next.saved_scene.is_some() {
             next.status = Some("Saved options updated in memory. Save before Play or Copy; file unchanged.".into());
@@ -795,7 +790,7 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                 KeyCode::Char(' ') => state.session.set_paused(!state.session.is_paused()),
                 KeyCode::Char('c') if state.temporary.is_some() => {
                     let entry = &browser.entries[browser.selected];
-                    let command = format!("ascii-animation run --config {}", shell_quote(&absolute_path(&entry.path)?.to_string_lossy()));
+                    let command = format!("ascii-animation run --config {}", shell_quote(&absolute_path(entry.path.as_path())?.to_string_lossy()));
                     state.dialog = Dialog::Saved(browser);
                     state.overlay(Dialog::Export { scroll: 0, choice: 0, command: Some(command) });
                     return Ok(TuiAction::Continue);
@@ -827,7 +822,7 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                     match validate_scene_name(&text) {
                         Err(message) => { error = Some(message); state.dialog = Dialog::Name { text, cursor, error, after }; },
                         Ok(name) => {
-                            let path = absolute_path(&state.library_path().join(format!("{name}.toml")))?;
+                            let path = absolute_path(state.library_path().join(format!("{name}.toml")))?.into_owned();
                             return state.persist(SaveRequest { path, name, overwrite: false, after }, registry);
                         }
                     }
@@ -1072,9 +1067,10 @@ fn handle_mouse(state: &mut TuiState, mouse: MouseEvent, registry: &PresetRegist
     Ok(TuiAction::Continue)
 }
 fn contains(area: Rect, x: u16, y: u16) -> bool { x >= area.x && y >= area.y && x < area.right() && y < area.bottom() }
-fn absolute_path(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() { Ok(path.to_path_buf()) }
-    else { std::env::current_dir().map(|cwd| cwd.join(path)).map_err(terminal_error) }
+fn absolute_path<'a>(path: impl Into<Cow<'a, Path>>) -> Result<Cow<'a, Path>> {
+    let path = path.into();
+    if path.is_absolute() { Ok(path) }
+    else { std::env::current_dir().map(|cwd| Cow::Owned(cwd.join(path))).map_err(terminal_error) }
 }
 fn validate_scene_name(text: &str) -> std::result::Result<String, String> {
     let name = text.trim();
