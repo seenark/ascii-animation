@@ -470,9 +470,6 @@ impl TuiState {
             Err(err) => { if let Dialog::Editor(draft) = &mut self.dialog { draft.error = Some(field_error_message(&err)); } }
         }
     }
-    fn open_browser(&mut self, replace: bool, registry: &PresetRegistry) -> Result<()> {
-        self.browse_presets(if replace { BrowserPurpose::Replace } else { BrowserPurpose::Add }, registry)
-    }
     fn browse_presets(&mut self, purpose: BrowserPurpose, registry: &PresetRegistry) -> Result<()> {
         self.open(Dialog::Browser(Browser { search: String::new(), cursor: 0, names: Vec::new(), selected: 0, purpose, typing: purpose != BrowserPurpose::New, previewing: false, description_scroll: 0 }));
         self.refresh_browser(registry)
@@ -863,7 +860,9 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
             if matches!(key.code, KeyCode::Enter | KeyCode::Char('s') | KeyCode::Char('d')) {
                 match choice {
                     0 => {
-                        state.dialog = Dialog::Guard { choice, transition: transition.clone() };
+                        if state.saved_name.is_none() {
+                            state.dialog = Dialog::Guard { choice, transition: transition.clone() };
+                        }
                         return state.request_save(false, AfterSave::Transition(transition), registry);
                     }
                     1 => return state.transition(transition, registry),
@@ -952,8 +951,8 @@ fn handle_key(state: &mut TuiState, key: KeyEvent, registry: &PresetRegistry) ->
                 KeyCode::Char('q') => return state.request_transition(Transition::Quit, registry),
                 KeyCode::Char(' ') => state.session.set_paused(!state.session.is_paused()),
                 KeyCode::Char('f') => state.toggle_fullscreen(),
-                KeyCode::Char('a') => state.open_browser(false, registry)?,
-                KeyCode::Char('r') if state.focus == PaneFocus::Scene => state.open_browser(true, registry)?,
+                KeyCode::Char('a') => state.browse_presets(BrowserPurpose::Add, registry)?,
+                KeyCode::Char('r') if state.focus == PaneFocus::Scene => state.browse_presets(BrowserPurpose::Replace, registry)?,
                 KeyCode::Char('s') => return state.request_save(false, AfterSave::Stay, registry),
                 KeyCode::Char('S') => return state.request_save(true, AfterSave::Stay, registry),
                 KeyCode::Char('c') => state.open(Dialog::Export { scroll: 0, choice: 0, command: None }),
@@ -1358,7 +1357,7 @@ pub fn render_tui(frame: &mut Frame<'_>, registry: &PresetRegistry, state: &mut 
     else if matches!(state.dialog, Dialog::None) && !fullscreen {
         if state.focus == PaneFocus::Scene { draw_scene(frame, state, layout.options); }
         else if !compact || state.view == EditorView::Edit { draw_inspector(frame, state, layout.options); }
-    } else if !fullscreen && !browsing { draw_dialog(frame, state, registry, area, dirty); }
+    } else if !fullscreen && !browsing { draw_dialog(frame, state, area, dirty); }
     let footer = Rect::new(area.x, area.y + area.height - 3, area.width, 3);
     draw_actions(frame, state, footer, dirty);
 }
@@ -1488,7 +1487,7 @@ fn draw_browser(frame: &mut Frame<'_>, state: &mut TuiState, registry: &PresetRe
     }
 }
 
-fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, _registry: &PresetRegistry, area: Rect, dirty: bool) {
+fn draw_dialog(frame: &mut Frame<'_>, state: &mut TuiState, area: Rect, dirty: bool) {
     let modal = modal_area(area, 82, 18);
     frame.render_widget(Clear, modal);
     let help_actions = matches!(state.dialog, Dialog::Help(_)).then(|| available_actions(state, true, Some(dirty)));
