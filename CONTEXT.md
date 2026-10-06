@@ -43,5 +43,3 @@ _Avoid_: Terminal size, viewport
 **Viewport**:
 The visible terminal area presenting part or all of the canvas. A smaller viewport does not imply a smaller composition.
 _Avoid_: Canvas, scene size
-
-[Showing lines 1-45 of 46. Use :46 to continue]

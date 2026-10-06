@@ -236,5 +236,3 @@ Keep the Rust terminal stack, preset descriptors, Scene model, existing animatio
 Do not add video/GIF export, runtime snapshots, frame-perfect replay, drag-based placement, command bookmarks, cloud sync, cross-machine bundles, arbitrary shell execution, a web UI, or a new visual identity. Saved Scene rename/delete, autosave, and history/versioning are not part of the approved feature set.
 
 Storage naming and the new actions' exact keys remain implementation choices constrained by this document. They must not change the approved workflows or weaken keyboard access. Production code, existing user files, README claims about shipped features, and git history are intentionally unchanged by this design delivery.
-
-[Showing lines 1-238 of 239. Use :239 to continue]

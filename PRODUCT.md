@@ -57,5 +57,3 @@ Provide visible focus, contextual key hints, complete keyboard access, readable 
 The requirements above were confirmed in the design interview tracked by Beads `ascii-animation-92a` and implemented under `ascii-animation-lmw`. Locked Rust tests, check, and build passed. Actual PTY journeys exercised keyboard and mouse workflows, named-file isolation and generated commands, complete composition, all four supported layouts, fullscreen, dialogs, failed writes, compatibility recovery, and terminal restoration. Clipboard failure was exercised through the production event/render interface; automation did not overwrite the native clipboard.
 
 See the [confirmed workflow and acceptance criteria](docs/superpowers/specs/2026-10-05-keyboard-first-saved-scenes-ux-design.md) and the domain glossary in [CONTEXT.md](CONTEXT.md).
-
-[Showing lines 1-59 of 60. Use :60 to continue]
